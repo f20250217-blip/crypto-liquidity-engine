@@ -1,52 +1,23 @@
 """
 Cross-Exchange Crypto Liquidity & Order Flow Engine
 =====================================================
-Pipeline: Collect Time-Series -> Compute Metrics -> Build Dashboard
-
-Modes:
-  "snapshot" — single-frame analysis (legacy)
-  "timeseries" — multi-sample time-aware analysis (default)
+Pipeline: Collect Time-Series -> Compute Metrics -> Build 3D Visualization
 """
 
 from src.data_fetcher import fetch_all_order_books
 from src.orderbook_processor import process_all
 from src.metrics import compute_all_metrics
-from src.visualizer import plot_metrics
-from src.advanced_visualizer import generate_all
 from src.time_collector import collect_snapshots
-from src.time_visualizer import generate_time_dashboard
 from src.threejs_visualizer import generate_threejs
 
 # --- Configuration ---
-MODE = "timeseries"       # "snapshot" or "timeseries"
 LIMIT = 50                # order book depth per side
-N_SAMPLES = 30            # snapshots to collect (timeseries mode)
+N_SAMPLES = 30            # snapshots to collect
 INTERVAL_SEC = 10         # seconds between samples
 
 
-def run_snapshot():
-    """Single-frame analysis (legacy mode)."""
-    print(f"Fetching top {LIMIT} order book levels from exchanges...")
-    order_books = fetch_all_order_books(limit=LIMIT)
-
-    if not order_books:
-        print("No exchange data available. Exiting.")
-        return
-
-    processed = process_all(order_books)
-    metrics = compute_all_metrics(processed)
-
-    _print_metrics(metrics)
-
-    print("\nGenerating static plots...")
-    plot_metrics(metrics)
-
-    print("\nGenerating interactive dashboards...")
-    generate_all(processed, metrics)
-
-
-def run_timeseries():
-    """Time-aware multi-sample analysis."""
+def run():
+    """Collect time-series order book data and build 3D visualization."""
     data = collect_snapshots(
         n_samples=N_SAMPLES,
         interval_sec=INTERVAL_SEC,
@@ -58,15 +29,12 @@ def run_timeseries():
         return
 
     # Print latest snapshot metrics
-    print(f"\nFetching final snapshot for summary...")
+    print("\nFetching final snapshot for summary...")
     order_books = fetch_all_order_books(limit=LIMIT)
     if order_books:
         processed = process_all(order_books)
         metrics = compute_all_metrics(processed)
         _print_metrics(metrics)
-
-    print("\nBuilding time-aware dashboard...")
-    generate_time_dashboard(data)
 
     print("\nBuilding Three.js 3D visualization...")
     generate_threejs(data)
@@ -92,10 +60,7 @@ def _print_metrics(metrics):
 
 
 def main():
-    if MODE == "timeseries":
-        run_timeseries()
-    else:
-        run_snapshot()
+    run()
     print("Done.")
 
 

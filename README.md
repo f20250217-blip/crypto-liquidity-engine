@@ -2,20 +2,17 @@
 
 > Comparing order book depth, spread, and flow imbalance across major crypto exchanges
 
-![Liquidity Dashboard](output/dashboard_preview.png)
-
 ## Overview
 
-Collects time-series order book data from Binance, Coinbase, and Kraken, then builds a multi-panel interactive dashboard showing how liquidity evolves over time — with heatmaps, 3D surfaces, wall detection, and imbalance trends.
+Collects time-series order book data from Binance, Coinbase, and Kraken, then builds an interactive Three.js 3D surface showing how liquidity evolves over time — with vertex-displaced geometry, custom color gradients, and cinematic lighting.
 
 ## Features
 
 - Time-series order book collection (30 samples at configurable intervals)
-- Cross-exchange volume aggregation across 200 price bins
-- Time vs Price liquidity heatmap with persistent wall detection
-- 3D liquidity surface showing volume evolution
-- Per-exchange order flow imbalance tracking over time
-- Single-snapshot mode for quick analysis
+- Cross-exchange volume aggregation across 400 price bins
+- WebGL 3D liquidity surface with bilinear-interpolated, Gaussian-smoothed height data
+- Per-exchange order flow imbalance tracking
+- Console metrics: spread, depth, imbalance per exchange
 
 ## Metrics
 
@@ -42,9 +39,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Set `MODE = "timeseries"` (default) for time-aware analysis or `MODE = "snapshot"` for single-frame.
-
-Configure collection in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10).
+Configure collection in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10), `LIMIT` (default 50).
 
 ## Output
 
@@ -52,17 +47,15 @@ Configure collection in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (def
 
 Formatted table with per-exchange metrics (best bid/ask, spread, volumes, imbalance).
 
-### Time-Series Dashboard (default)
+### 3D Liquidity Surface
 
-`output/dashboard.html` — unified 3-panel dashboard:
+`output/3d_liquidity_premium.html` — self-contained WebGL visualization:
 
-1. **Liquidity Heatmap** — time vs price, colored by volume intensity, with auto-detected wall annotations
-2. **3D Liquidity Surface** — interactive surface showing volume evolution across price and time
-3. **Imbalance Trends** — per-exchange order flow imbalance over the collection window
-
-### Snapshot Mode
-
-Single-frame outputs: `output/dashboard.html`, `output/heatmap.html`, `output/liquidity_comparison.png`
+- **PlaneGeometry** with 140x100 vertex grid displaced by aggregated volume
+- **9-stop color gradient** (purple → blue → cyan → green → yellow) mapped to height
+- **3-point lighting** (key, fill, rim) with ACES filmic tone mapping
+- **OrbitControls** for interactive camera rotation and zoom
+- **Fog and reflection plane** for depth and atmosphere
 
 ## Project Structure
 
@@ -73,9 +66,7 @@ crypto-liquidity-engine/
 │   ├── orderbook_processor.py   # Bid/ask extraction
 │   ├── metrics.py               # Liquidity and imbalance computation
 │   ├── time_collector.py        # Time-series snapshot collector
-│   ├── time_visualizer.py       # Time-aware dashboard builder
-│   ├── visualizer.py            # Static matplotlib charts
-│   └── advanced_visualizer.py   # Snapshot-mode Plotly dashboards
+│   └── threejs_visualizer.py    # Three.js WebGL 3D surface generator
 ├── output/                      # Generated outputs
 ├── main.py                      # Pipeline entry point
 ├── requirements.txt

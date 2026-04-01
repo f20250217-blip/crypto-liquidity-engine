@@ -1,6 +1,6 @@
 """
-Three.js premium 3D liquidity surface generator.
-Produces a self-contained HTML file with WebGL rendering.
+Three.js WebGL 3D liquidity surface generator.
+Produces a self-contained HTML file — no Plotly, no matplotlib.
 """
 
 import os
@@ -10,16 +10,16 @@ from scipy.ndimage import gaussian_filter
 from scipy.interpolate import RegularGridInterpolator
 
 
-def _prepare_grid(data: dict, grid_res: int = 120) -> dict:
+def _prepare_grid(data: dict, grid_cols: int = 140, grid_rows: int = 100) -> dict:
     """
-    Aggregate volume data and resample onto a smooth grid.
+    Aggregate volume across exchanges and resample onto a high-resolution
+    grid suitable for Three.js PlaneGeometry vertex displacement.
 
-    Returns dict with:
-        heights: flattened list of normalised height values (row-major)
-        rows: number of rows (time axis)
-        cols: number of columns (price axis)
+    Returns:
+        heights: row-major flattened list of normalised [0,1] values
+        rows: grid rows (depth / time axis)
+        cols: grid columns (price axis)
     """
-    # Aggregate across exchanges
     matrices = list(data["price_grids"].values())
     agg = np.zeros_like(matrices[0])
     for m in matrices:
@@ -27,10 +27,10 @@ def _prepare_grid(data: dict, grid_res: int = 120) -> dict:
 
     n_time, n_price = agg.shape
 
-    # Log-scale to compress spikes
+    # Log-scale to compress dominant spikes
     agg = np.log1p(agg)
 
-    # Resample to target resolution via interpolation
+    # Resample via bilinear interpolation onto target grid
     t_orig = np.linspace(0, 1, n_time)
     p_orig = np.linspace(0, 1, n_price)
     interp = RegularGridInterpolator(
@@ -38,46 +38,46 @@ def _prepare_grid(data: dict, grid_res: int = 120) -> dict:
         method="linear", bounds_error=False, fill_value=0,
     )
 
-    rows = min(grid_res, max(n_time * 4, 60))
-    cols = grid_res
-    t_new = np.linspace(0, 1, rows)
-    p_new = np.linspace(0, 1, cols)
+    t_new = np.linspace(0, 1, grid_rows)
+    p_new = np.linspace(0, 1, grid_cols)
     tg, pg = np.meshgrid(t_new, p_new, indexing="ij")
     resampled = interp((tg, pg))
 
     # Smooth for fluid surface
-    resampled = gaussian_filter(resampled, sigma=1.2)
+    resampled = gaussian_filter(resampled, sigma=1.0)
 
     # Normalise to [0, 1]
     vmax = resampled.max()
     if vmax > 0:
         resampled = resampled / vmax
 
-    # Flatten row-major for JS consumption
-    heights = resampled.flatten().tolist()
-    # Round to 4 decimals to keep file size down
-    heights = [round(h, 4) for h in heights]
-
-    return {"heights": heights, "rows": rows, "cols": cols}
+    heights = [round(float(h), 4) for h in resampled.flatten()]
+    return {"heights": heights, "rows": grid_rows, "cols": grid_cols}
 
 
 def generate_threejs(data: dict):
-    """
-    Generate a self-contained Three.js HTML file with an interactive
-    3D liquidity surface.
-    """
+    """Generate output/3d_liquidity_premium.html — pure Three.js WebGL."""
     os.makedirs("output", exist_ok=True)
 
     grid = _prepare_grid(data)
     grid_json = json.dumps(grid, separators=(",", ":"))
 
-    html = f"""<!DOCTYPE html>
+    html = _build_html(grid_json)
+
+    out = "output/3d_liquidity_premium.html"
+    with open(out, "w") as f:
+        f.write(html)
+    print(f"  Saved {out}")
+
+
+def _build_html(grid_json: str) -> str:
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>3D Liquidity Surface</title>
 <style>
-  * {{ margin: 0; padding: 0; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{ background: #0b0f17; overflow: hidden; }}
   canvas {{ display: block; }}
 </style>
@@ -95,125 +95,139 @@ def generate_threejs(data: dict):
 import * as THREE from 'three';
 import {{ OrbitControls }} from 'three/addons/controls/OrbitControls.js';
 
-// ── Data ──
+/* ── Data ── */
 const grid = {grid_json};
 const ROWS = grid.rows;
 const COLS = grid.cols;
-const heights = grid.heights;
+const H = grid.heights;
 
-// ── Color gradient: purple → blue → cyan → yellow ──
-function heightColor(t) {{
-  const stops = [
-    [0.00, 0.10, 0.02, 0.13],
-    [0.20, 0.18, 0.11, 0.41],
-    [0.40, 0.11, 0.23, 0.54],
-    [0.55, 0.06, 0.44, 0.63],
-    [0.70, 0.09, 0.64, 0.72],
-    [0.82, 0.13, 0.79, 0.63],
-    [0.92, 0.72, 0.88, 0.31],
-    [1.00, 0.94, 0.91, 0.19],
-  ];
-  let lo = stops[0], hi = stops[stops.length - 1];
-  for (let i = 0; i < stops.length - 1; i++) {{
-    if (t >= stops[i][0] && t <= stops[i + 1][0]) {{
-      lo = stops[i];
-      hi = stops[i + 1];
-      break;
+/* ── Color stops: purple → blue → cyan → green → yellow ── */
+const STOPS = [
+  [0.00, 0.10, 0.02, 0.13],
+  [0.15, 0.17, 0.10, 0.41],
+  [0.30, 0.11, 0.23, 0.54],
+  [0.45, 0.05, 0.37, 0.63],
+  [0.58, 0.09, 0.54, 0.72],
+  [0.70, 0.09, 0.69, 0.65],
+  [0.82, 0.50, 0.82, 0.38],
+  [0.92, 0.80, 0.90, 0.24],
+  [1.00, 0.94, 0.91, 0.19],
+];
+
+function colorAt(t) {{
+  t = Math.max(0, Math.min(1, t));
+  let lo = STOPS[0], hi = STOPS[STOPS.length - 1];
+  for (let i = 0; i < STOPS.length - 1; i++) {{
+    if (t >= STOPS[i][0] && t <= STOPS[i + 1][0]) {{
+      lo = STOPS[i]; hi = STOPS[i + 1]; break;
     }}
   }}
-  const f = (hi[0] - lo[0]) > 0 ? (t - lo[0]) / (hi[0] - lo[0]) : 0;
+  const f = hi[0] > lo[0] ? (t - lo[0]) / (hi[0] - lo[0]) : 0;
   return new THREE.Color(
     lo[1] + (hi[1] - lo[1]) * f,
     lo[2] + (hi[2] - lo[2]) * f,
-    lo[3] + (hi[3] - lo[3]) * f,
+    lo[3] + (hi[3] - lo[3]) * f
   );
 }}
 
-// ── Scene ──
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0f17);
-
-// ── Camera ──
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(5, 4, 7);
-
-// ── Renderer ──
-const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+/* ── Renderer ── */
+const renderer = new THREE.WebGLRenderer({{ antialias: true, alpha: false }});
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.15;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-// ── Controls ──
+/* ── Scene ── */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f17);
+scene.fog = new THREE.FogExp2(0x0b0f17, 0.035);
+
+/* ── Camera ── */
+const camera = new THREE.PerspectiveCamera(
+  45, window.innerWidth / window.innerHeight, 0.1, 200
+);
+camera.position.set(6, 4.5, 8);
+
+/* ── Controls ── */
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.06;
-controls.minDistance = 2;
-controls.maxDistance = 20;
-controls.target.set(0, 0.5, 0);
+controls.dampingFactor = 0.05;
+controls.minDistance = 3;
+controls.maxDistance = 25;
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.target.set(0, 0.6, 0);
 
-// ── Geometry ──
-const WIDTH = 8;
-const DEPTH = 6;
-const HEIGHT_SCALE = 2.5;
+/* ── Geometry: PlaneGeometry displaced by volume ── */
+const W = 10, D = 7, HSCALE = 3.0;
+const geo = new THREE.PlaneGeometry(W, D, COLS - 1, ROWS - 1);
+geo.rotateX(-Math.PI / 2);
 
-const geometry = new THREE.BufferGeometry();
-const vertices = [];
-const colors = [];
-const indices = [];
+const pos = geo.attributes.position;
+const colors = new Float32Array(pos.count * 3);
 
-for (let r = 0; r < ROWS; r++) {{
-  for (let c = 0; c < COLS; c++) {{
-    const x = (c / (COLS - 1)) * WIDTH - WIDTH / 2;
-    const z = (r / (ROWS - 1)) * DEPTH - DEPTH / 2;
-    const h = heights[r * COLS + c];
-    const y = h * HEIGHT_SCALE;
+for (let i = 0; i < pos.count; i++) {{
+  /* PlaneGeometry lays out vertices row by row along width (x),
+     then advances along depth (z). Map to our grid. */
+  const col = i % COLS;
+  const row = Math.floor(i / COLS);
+  const h = H[row * COLS + col];
 
-    vertices.push(x, y, z);
+  pos.setY(i, h * HSCALE);
 
-    const col = heightColor(h);
-    colors.push(col.r, col.g, col.b);
-  }}
+  const c = colorAt(h);
+  colors[i * 3]     = c.r;
+  colors[i * 3 + 1] = c.g;
+  colors[i * 3 + 2] = c.b;
 }}
 
-for (let r = 0; r < ROWS - 1; r++) {{
-  for (let c = 0; c < COLS - 1; c++) {{
-    const i = r * COLS + c;
-    indices.push(i, i + COLS, i + 1);
-    indices.push(i + 1, i + COLS, i + COLS + 1);
-  }}
-}}
+geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+geo.computeVertexNormals();
 
-geometry.setIndex(indices);
-geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-geometry.computeVertexNormals();
-
-// ── Material ──
-const material = new THREE.MeshStandardMaterial({{
+/* ── Material ── */
+const mat = new THREE.MeshStandardMaterial({{
   vertexColors: true,
-  roughness: 0.35,
-  metalness: 0.15,
+  roughness: 0.32,
+  metalness: 0.12,
+  flatShading: false,
   side: THREE.DoubleSide,
 }});
 
-const mesh = new THREE.Mesh(geometry, material);
+const mesh = new THREE.Mesh(geo, mat);
 scene.add(mesh);
 
-// ── Lighting ──
-const ambient = new THREE.AmbientLight(0x404060, 0.8);
-scene.add(ambient);
+/* ── Subtle reflection plane beneath the surface ── */
+const mirrorGeo = new THREE.PlaneGeometry(W * 1.4, D * 1.4);
+mirrorGeo.rotateX(-Math.PI / 2);
+const mirrorMat = new THREE.MeshStandardMaterial({{
+  color: 0x0b0f17,
+  roughness: 0.6,
+  metalness: 0.3,
+  transparent: true,
+  opacity: 0.35,
+}});
+const mirror = new THREE.Mesh(mirrorGeo, mirrorMat);
+mirror.position.y = -0.05;
+scene.add(mirror);
 
-const dir1 = new THREE.DirectionalLight(0xffffff, 1.0);
-dir1.position.set(5, 8, 4);
-scene.add(dir1);
+/* ── Lighting ── */
+const amb = new THREE.AmbientLight(0x303050, 0.7);
+scene.add(amb);
 
-const dir2 = new THREE.DirectionalLight(0x6688cc, 0.4);
-dir2.position.set(-4, 3, -5);
-scene.add(dir2);
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(6, 10, 5);
+scene.add(key);
 
-// ── Render loop ──
+const fill = new THREE.DirectionalLight(0x5577aa, 0.5);
+fill.position.set(-5, 4, -6);
+scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0x8844cc, 0.3);
+rim.position.set(0, 2, -8);
+scene.add(rim);
+
+/* ── Render loop ── */
 function animate() {{
   requestAnimationFrame(animate);
   controls.update();
@@ -221,7 +235,7 @@ function animate() {{
 }}
 animate();
 
-// ── Resize ──
+/* ── Resize ── */
 window.addEventListener('resize', () => {{
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -230,8 +244,3 @@ window.addEventListener('resize', () => {{
 </script>
 </body>
 </html>"""
-
-    out = "output/3d_liquidity_premium.html"
-    with open(out, "w") as f:
-        f.write(html)
-    print(f"  Saved {out}")

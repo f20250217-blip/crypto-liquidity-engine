@@ -8,8 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
-from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import gaussian_filter1d
 
 
 # --- Theme constants ---
@@ -111,186 +110,211 @@ def build_heatmap(
 
 
 # ──────────────────────────────────────────────
-#  2. 3D Liquidity Surface
+#  2. Liquidity Map (replaces 3D surface)
 # ──────────────────────────────────────────────
-def _detect_ridges(vol_smooth: np.ndarray, price_grid: np.ndarray, ex_fine: np.ndarray, exchanges: list[str]):
+def _detect_walls(prices: np.ndarray, vols: np.ndarray, threshold_pct: float = 85):
     """
-    Find the top 3 volume peaks and return annotation dicts.
-    Labels are assigned based on position relative to the mid-price.
+    Detect liquidity walls — price levels where volume exceeds the
+    given percentile threshold.
+
+    Returns list of dicts with price, volume, and side label.
     """
-    flat_idx = np.argsort(vol_smooth.ravel())[::-1]
-    annotations = []
-    labels = ["High Liquidity Zone", "Buy Pressure Region", "Sell Pressure Region"]
-    used = set()
-    mid_price = (price_grid[0] + price_grid[-1]) / 2
-
-    for idx in flat_idx:
-        if len(annotations) >= 3:
-            break
-        r, c = np.unravel_index(idx, vol_smooth.shape)
-        # Skip if too close to an existing annotation
-        key = (r // 4, c // 8)
-        if key in used:
-            continue
-        used.add(key)
-
-        price = price_grid[c]
-        ex_val = ex_fine[r]
-        z_val = vol_smooth[r, c]
-
-        # Pick label based on position
-        if not annotations:
-            label = labels[0]
-        elif price < mid_price:
-            label = labels[1]
-        else:
-            label = labels[2]
-
-        annotations.append(dict(
-            x=price, y=ex_val, z=z_val + 0.08,
-            text=label,
-            font=dict(size=12, color="#f0e830"),
-            showarrow=False,
-            bgcolor="rgba(11,15,23,0.7)",
-            borderpad=4,
-        ))
-
-    return annotations
+    threshold = np.percentile(vols[vols > 0], threshold_pct) if np.any(vols > 0) else 0
+    walls = []
+    for i, (p, v) in enumerate(zip(prices, vols)):
+        if v >= threshold and v > 0:
+            walls.append({"price": p, "volume": v, "idx": i})
+    return walls
 
 
-def build_3d_surface(
+def build_liquidity_map(
     processed: dict[str, tuple[pd.DataFrame, pd.DataFrame]],
 ) -> go.Figure:
     """
-    Create a premium 3D liquidity surface: X=price, Y=exchange, Z=volume.
-    Smoothed, interpolated, with ridge annotations and contour projection.
+    Create a professional liquidity map with:
+      - High-resolution heatmap showing volume intensity across price and exchange
+      - Bid/ask depth curves overlaid
+      - Liquidity wall annotations at volume spike zones
     """
     exchanges = list(processed.keys())
     n_exchanges = len(exchanges)
 
-    # Build a common price grid across all exchanges
+    # Build common price grid (300 bins)
     all_prices = []
     for bids, asks in processed.values():
         all_prices.extend(bids["price"].tolist())
         all_prices.extend(asks["price"].tolist())
     price_min, price_max = min(all_prices), max(all_prices)
-    n_grid = 200  # finer grid for smoother surface
-    price_grid = np.linspace(price_min, price_max, n_grid)
+    n_bins = 300
+    price_grid = np.linspace(price_min, price_max, n_bins)
 
-    # Build volume matrix: rows=exchanges, cols=price grid points
-    vol_matrix = np.zeros((n_exchanges, n_grid))
+    # Build heatmap matrix: one row per exchange, volume interpolated onto grid
+    heat_matrix = np.zeros((n_exchanges, n_bins))
+    mid_prices = {}
+    exchange_data = {}  # store per-exchange bid/ask curves for overlay
+
     for i, (ex, (bids, asks)) in enumerate(processed.items()):
-        prices = np.concatenate([bids["price"].values, asks["price"].values])
-        vols = np.concatenate([bids["volume"].values, asks["volume"].values])
+        bid_prices = bids["price"].values
+        bid_vols = bids["volume"].values
+        ask_prices = asks["price"].values
+        ask_vols = asks["volume"].values
+
+        mid_prices[ex] = (bid_prices[0] + ask_prices[0]) / 2
+
+        # Combine into single price-volume series
+        prices = np.concatenate([bid_prices, ask_prices])
+        vols = np.concatenate([bid_vols, ask_vols])
         order = np.argsort(prices)
         prices, vols = prices[order], vols[order]
-        vol_matrix[i] = np.interp(price_grid, prices, vols, left=0, right=0)
 
-    # Smooth along price axis
-    vol_matrix = gaussian_filter1d(vol_matrix, sigma=2.5, axis=1)
+        # Interpolate onto common grid
+        interp_vols = np.interp(price_grid, prices, vols, left=0, right=0)
+        heat_matrix[i] = interp_vols
 
-    # Normalise
-    vmax = vol_matrix.max()
-    if vmax > 0:
-        vol_matrix = vol_matrix / vmax
+        # Cumulative depth curves
+        bid_cum = np.cumsum(bid_vols)
+        ask_cum = np.cumsum(ask_vols)
+        exchange_data[ex] = {
+            "bid_prices": bid_prices,
+            "bid_cum": bid_cum,
+            "ask_prices": ask_prices,
+            "ask_cum": ask_cum,
+            "prices_combined": prices,
+            "vols_combined": vols,
+        }
 
-    # Upsample exchange axis for fluid surface
-    if n_exchanges >= 2:
-        ex_orig = np.arange(n_exchanges)
-        ex_fine = np.linspace(0, n_exchanges - 1, max(n_exchanges * 12, 36))
-        interp = RegularGridInterpolator(
-            (ex_orig, np.arange(n_grid)), vol_matrix,
-            method="linear", bounds_error=False, fill_value=0,
-        )
-        ex_grid, p_grid = np.meshgrid(ex_fine, np.arange(n_grid), indexing="ij")
-        vol_smooth = interp((ex_grid, p_grid))
-    else:
-        ex_fine = np.array([0.0])
-        vol_smooth = vol_matrix
+    # Normalise heatmap rows independently for consistent color intensity
+    for i in range(n_exchanges):
+        row_max = heat_matrix[i].max()
+        if row_max > 0:
+            heat_matrix[i] = heat_matrix[i] / row_max
 
-    # 2D Gaussian for final surface fluidity
-    vol_smooth = gaussian_filter(vol_smooth, sigma=1.5)
+    # ── Layout: heatmap on top, depth curves per exchange below ──
+    n_rows = 1 + n_exchanges
+    row_heights = [0.45] + [0.55 / n_exchanges] * n_exchanges
+    subtitles = ["Liquidity Heatmap"] + [f"{ex} — Depth Curve" for ex in exchanges]
 
-    # Ridge annotations
-    annotations = _detect_ridges(vol_smooth, price_grid, ex_fine, exchanges)
-
-    fig = go.Figure(
-        data=[
-            go.Surface(
-                x=price_grid,
-                y=ex_fine,
-                z=vol_smooth,
-                colorscale=LIQUIDITY_COLORSCALE,
-                opacity=0.93,
-                showscale=True,
-                colorbar=dict(
-                    title=dict(text="Volume", side="right", font=dict(size=12, color="#AAAAAA")),
-                    tickfont=dict(size=10, color="#888888"),
-                    thickness=14,
-                    len=0.45,
-                    outlinewidth=0,
-                ),
-                lighting=dict(
-                    ambient=0.35,
-                    diffuse=0.55,
-                    specular=0.12,
-                    roughness=0.7,
-                ),
-                contours=dict(
-                    z=dict(
-                        show=True,
-                        usecolormap=True,
-                        highlightcolor="rgba(255,255,255,0.15)",
-                        project_z=True,
-                    ),
-                ),
-            )
-        ]
+    fig = make_subplots(
+        rows=n_rows, cols=1,
+        row_heights=row_heights,
+        subplot_titles=subtitles,
+        vertical_spacing=0.06,
     )
 
-    # Exchange tick labels
-    tickvals = list(range(n_exchanges))
-    ticktext = exchanges
+    # ── Heatmap ──
+    fig.add_trace(
+        go.Heatmap(
+            z=heat_matrix,
+            x=price_grid,
+            y=exchanges,
+            colorscale=LIQUIDITY_COLORSCALE,
+            showscale=True,
+            zmin=0,
+            zmax=1,
+            colorbar=dict(
+                title=dict(text="Volume Intensity", font=dict(size=11, color="#AAAAAA")),
+                tickfont=dict(size=10, color="#888888"),
+                thickness=12,
+                len=0.35,
+                y=0.82,
+                outlinewidth=0,
+            ),
+            hovertemplate="Price: $%{x:,.2f}<br>Exchange: %{y}<br>Intensity: %{z:.3f}<extra></extra>",
+        ),
+        row=1, col=1,
+    )
 
-    axis_bg = "#0a0e16"
+    # Detect and annotate liquidity walls on heatmap
+    for i, ex in enumerate(exchanges):
+        row_vols = heat_matrix[i]
+        walls = _detect_walls(price_grid, row_vols, threshold_pct=90)
+        for w in walls[:2]:  # max 2 wall markers per exchange
+            fig.add_annotation(
+                x=w["price"], y=ex,
+                text="Wall",
+                font=dict(size=9, color="#f0e830"),
+                bgcolor="rgba(11,15,23,0.8)",
+                borderpad=2,
+                showarrow=True,
+                arrowhead=0,
+                arrowcolor="#f0e830",
+                arrowwidth=1,
+                ax=0, ay=-25,
+                row=1, col=1,
+            )
 
+    # ── Depth curves per exchange ──
+    for i, ex in enumerate(exchanges):
+        row_idx = 2 + i
+        d = exchange_data[ex]
+
+        # Bid depth (green, right-to-left cumulative)
+        fig.add_trace(
+            go.Scatter(
+                x=d["bid_prices"], y=d["bid_cum"],
+                mode="lines",
+                fill="tozeroy",
+                fillcolor="rgba(46,204,113,0.15)",
+                line=dict(color="#2ecc71", width=1.5),
+                name=f"{ex} Bids",
+                showlegend=False,
+                hovertemplate="$%{x:,.2f}<br>Cum. Vol: %{y:.4f} BTC<extra>Bids</extra>",
+            ),
+            row=row_idx, col=1,
+        )
+
+        # Ask depth (red, left-to-right cumulative)
+        fig.add_trace(
+            go.Scatter(
+                x=d["ask_prices"], y=d["ask_cum"],
+                mode="lines",
+                fill="tozeroy",
+                fillcolor="rgba(231,76,60,0.15)",
+                line=dict(color="#e74c3c", width=1.5),
+                name=f"{ex} Asks",
+                showlegend=False,
+                hovertemplate="$%{x:,.2f}<br>Cum. Vol: %{y:.4f} BTC<extra>Asks</extra>",
+            ),
+            row=row_idx, col=1,
+        )
+
+        # Mid-price vertical line
+        fig.add_vline(
+            x=mid_prices[ex],
+            line=dict(color="rgba(255,255,255,0.25)", width=1, dash="dot"),
+            row=row_idx, col=1,
+        )
+
+    # ── Global layout ──
+    total_height = 400 + 220 * n_exchanges
     fig.update_layout(
         title=dict(
             text=(
-                "Cross-Exchange Liquidity Surface<br>"
+                "Cross-Exchange Liquidity Map<br>"
                 "<span style='font-size:13px;color:#888888'>"
                 "Real-Time Order Book Depth Analysis</span>"
             ),
             font=dict(size=19, color="#DDDDDD"),
             x=0.5,
         ),
-        scene=dict(
-            xaxis=dict(
-                title=dict(text="Price (USDT)", font=dict(size=13)),
-                gridcolor=GRID, color="#999999", backgroundcolor=axis_bg,
-                nticks=8, tickfont=dict(size=10, color="#777777"),
-            ),
-            yaxis=dict(
-                title=dict(text="Exchange", font=dict(size=13)),
-                gridcolor=GRID, color="#999999", backgroundcolor=axis_bg,
-                tickvals=tickvals, ticktext=ticktext,
-                tickfont=dict(size=10, color="#777777"),
-            ),
-            zaxis=dict(
-                title=dict(text="Volume (norm.)", font=dict(size=13)),
-                gridcolor=GRID, color="#999999", backgroundcolor=axis_bg,
-                nticks=5, tickfont=dict(size=10, color="#777777"),
-            ),
-            bgcolor=BG,
-            aspectratio=dict(x=1.5, y=1.0, z=0.7),
-            camera=dict(eye=dict(x=1.35, y=1.25, z=0.85)),
-            annotations=annotations,
-        ),
         paper_bgcolor=BG,
         plot_bgcolor=BG,
         font=FONT,
-        margin=dict(l=0, r=0, t=70, b=0),
+        height=total_height,
+        margin=dict(l=60, r=40, t=80, b=40),
     )
+
+    # Style all axes
+    for key in fig.layout.to_plotly_json():
+        if key.startswith("xaxis"):
+            fig.layout[key].update(
+                gridcolor=GRID, tickfont=dict(size=10, color="#777777"),
+            )
+        if key.startswith("yaxis"):
+            fig.layout[key].update(
+                gridcolor=GRID, tickfont=dict(size=10, color="#777777"),
+            )
+
     return fig
 
 
@@ -370,6 +394,6 @@ def generate_all(
     heatmap.write_html("output/heatmap.html", auto_open=False)
     print("  Saved output/heatmap.html")
 
-    surface = build_3d_surface(processed)
-    surface.write_html("output/3d_liquidity.html", auto_open=True)
-    print("  Saved output/3d_liquidity.html")
+    liquidity_map = build_liquidity_map(processed)
+    liquidity_map.write_html("output/liquidity_heatmap.html", auto_open=True)
+    print("  Saved output/liquidity_heatmap.html")

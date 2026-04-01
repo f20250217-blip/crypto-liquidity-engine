@@ -2,7 +2,7 @@
 
 > Comparing order book depth, spread, and flow imbalance across major crypto exchanges
 
-![3D Liquidity Surface](output/3d_liquidity_preview.png)
+![Liquidity Map](output/liquidity_map_preview.png)
 
 ## Overview
 
@@ -56,7 +56,7 @@ Formatted table with per-exchange metrics (best bid/ask, spread, volumes, imbala
 |------|-------------|
 | `output/dashboard.html` | Imbalance and spread comparison bars |
 | `output/heatmap.html` | Order book depth heatmap per exchange |
-| `output/3d_liquidity.html` | 3D liquidity surface across exchanges and price levels |
+| `output/liquidity_heatmap.html` | Liquidity map with depth curves and wall detection |
 
 ### Static Plot
 

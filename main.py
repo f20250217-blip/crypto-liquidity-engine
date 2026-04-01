@@ -8,6 +8,7 @@ from src.data_fetcher import fetch_all_order_books
 from src.orderbook_processor import process_all
 from src.metrics import compute_all_metrics
 from src.visualizer import plot_metrics
+from src.advanced_visualizer import generate_all
 
 LIMIT = 50  # order book depth per side
 
@@ -44,9 +45,13 @@ def main():
 
     print("\n" + "=" * 72)
 
-    # 5. Visualize
-    print("\nGenerating comparison plots...")
+    # 5. Static plots
+    print("\nGenerating static plots...")
     plot_metrics(metrics)
+
+    # 6. Interactive dashboards
+    print("\nGenerating interactive dashboards...")
+    generate_all(processed, metrics)
     print("Done.")
 
 

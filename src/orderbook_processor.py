@@ -15,8 +15,11 @@ def extract_sides(order_book: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     Returns:
         (bids_df, asks_df) each with columns: price, volume.
     """
-    bids = pd.DataFrame(order_book["bids"], columns=["price", "volume"])
-    asks = pd.DataFrame(order_book["asks"], columns=["price", "volume"])
+    # Some exchanges return extra columns (e.g. Kraken adds timestamp) — take first two
+    bids_raw = [row[:2] for row in order_book["bids"]]
+    asks_raw = [row[:2] for row in order_book["asks"]]
+    bids = pd.DataFrame(bids_raw, columns=["price", "volume"])
+    asks = pd.DataFrame(asks_raw, columns=["price", "volume"])
     return bids, asks
 
 

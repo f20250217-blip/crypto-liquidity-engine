@@ -2,22 +2,20 @@
 
 > Comparing order book depth, spread, and flow imbalance across major crypto exchanges
 
-![Liquidity Map](output/liquidity_map_preview.png)
+![Liquidity Dashboard](output/dashboard_preview.png)
 
 ## Overview
 
-Fetches live BTC/USDT order books from Binance, Coinbase, and Kraken, computes liquidity metrics, and generates interactive dashboards with depth heatmaps, a 3D liquidity surface, and imbalance charts.
+Collects time-series order book data from Binance, Coinbase, and Kraken, then builds a multi-panel interactive dashboard showing how liquidity evolves over time — with heatmaps, 3D surfaces, wall detection, and imbalance trends.
 
 ## Features
 
-- Real-time order book fetching from 3 exchanges via ccxt
-- Bid/ask volume aggregation across top 50 levels
-- Spread calculation in absolute and basis-point terms
-- Order flow imbalance detection
-- Interactive Plotly dashboards with dark theme
-- Order book depth heatmap per exchange
-- 3D cross-exchange liquidity surface
-- Static matplotlib comparison charts
+- Time-series order book collection (30 samples at configurable intervals)
+- Cross-exchange volume aggregation across 200 price bins
+- Time vs Price liquidity heatmap with persistent wall detection
+- 3D liquidity surface showing volume evolution
+- Per-exchange order flow imbalance tracking over time
+- Single-snapshot mode for quick analysis
 
 ## Metrics
 
@@ -44,23 +42,27 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Set `MODE = "timeseries"` (default) for time-aware analysis or `MODE = "snapshot"` for single-frame.
+
+Configure collection in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10).
+
 ## Output
 
 ### Console
 
 Formatted table with per-exchange metrics (best bid/ask, spread, volumes, imbalance).
 
-### Interactive Dashboards
+### Time-Series Dashboard (default)
 
-| File | Description |
-|------|-------------|
-| `output/dashboard.html` | Imbalance and spread comparison bars |
-| `output/heatmap.html` | Order book depth heatmap per exchange |
-| `output/liquidity_heatmap.html` | Liquidity map with depth curves and wall detection |
+`output/dashboard.html` — unified 3-panel dashboard:
 
-### Static Plot
+1. **Liquidity Heatmap** — time vs price, colored by volume intensity, with auto-detected wall annotations
+2. **3D Liquidity Surface** — interactive surface showing volume evolution across price and time
+3. **Imbalance Trends** — per-exchange order flow imbalance over the collection window
 
-`output/liquidity_comparison.png` — matplotlib imbalance and spread charts.
+### Snapshot Mode
+
+Single-frame outputs: `output/dashboard.html`, `output/heatmap.html`, `output/liquidity_comparison.png`
 
 ## Project Structure
 
@@ -70,8 +72,10 @@ crypto-liquidity-engine/
 │   ├── data_fetcher.py          # Multi-exchange order book retrieval
 │   ├── orderbook_processor.py   # Bid/ask extraction
 │   ├── metrics.py               # Liquidity and imbalance computation
+│   ├── time_collector.py        # Time-series snapshot collector
+│   ├── time_visualizer.py       # Time-aware dashboard builder
 │   ├── visualizer.py            # Static matplotlib charts
-│   └── advanced_visualizer.py   # Interactive Plotly dashboards
+│   └── advanced_visualizer.py   # Snapshot-mode Plotly dashboards
 ├── output/                      # Generated outputs
 ├── main.py                      # Pipeline entry point
 ├── requirements.txt

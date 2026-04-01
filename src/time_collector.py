@@ -87,7 +87,7 @@ def collect_snapshots(
             all_prices.extend(ex_data["asks"]["price"].tolist())
 
     price_min, price_max = min(all_prices), max(all_prices)
-    n_bins = 200
+    n_bins = 400
     price_grid = np.linspace(price_min, price_max, n_bins)
 
     # Build time-series matrices per exchange

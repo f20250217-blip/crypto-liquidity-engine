@@ -65,14 +65,19 @@ def _build_heatmap(vol_smooth, price_grid, time_labels, walls) -> go.Figure:
     """Panel 1: Time vs Price heatmap with wall annotations."""
     fig = go.Figure()
 
+    # Percentile-based color range for balanced contrast
+    zmin = float(np.percentile(vol_smooth, 2))
+    zmax = float(np.percentile(vol_smooth, 97))
+
     fig.add_trace(go.Heatmap(
         z=vol_smooth,
         x=price_grid,
         y=time_labels,
         colorscale=COLORSCALE,
         showscale=True,
-        zmin=0,
-        zmax=float(np.percentile(vol_smooth, 98)),
+        zmin=zmin,
+        zmax=zmax,
+        zsmooth="best",  # bicubic interpolation for smooth rendering
         colorbar=dict(
             title=dict(text="Volume", font=dict(size=11, color="#999999")),
             tickfont=dict(size=10, color="#777777"),
@@ -103,10 +108,11 @@ def _build_heatmap(vol_smooth, price_grid, time_labels, walls) -> go.Figure:
             ),
             font=dict(size=17, color="#DDDDDD"), x=0.5,
         ),
-        xaxis=dict(title="Price (USDT)", **AXIS_STYLE),
+        xaxis=dict(title="Price (USDT)", nticks=12, **AXIS_STYLE),
         yaxis=dict(title="Time", **AXIS_STYLE),
         paper_bgcolor=BG, plot_bgcolor=BG, font=FONT,
-        height=500, margin=dict(l=60, r=40, t=70, b=40),
+        height=550, width=1400,
+        margin=dict(l=70, r=30, t=70, b=50),
     )
     return fig
 
@@ -207,12 +213,14 @@ def generate_time_dashboard(data: dict):
     price_grid = data["price_grid"]
     n_times = len(timestamps)
 
-    # Aggregate and smooth
+    # Aggregate, log-scale, normalise
     vol_matrix = _aggregate_volume_matrix(data)
+    vol_matrix = np.log1p(vol_matrix)  # log scale to prevent bright-spot dominance
     vmax = vol_matrix.max()
     if vmax > 0:
         vol_matrix = vol_matrix / vmax
-    vol_smooth = gaussian_filter(vol_matrix, sigma=(1.0, 2.0))
+    # No heavy blur — keep crisp boundaries
+    vol_smooth = gaussian_filter(vol_matrix, sigma=(0.4, 0.8))
 
     time_labels = [t.strftime("%H:%M:%S") for t in timestamps]
     time_indices = np.arange(n_times)

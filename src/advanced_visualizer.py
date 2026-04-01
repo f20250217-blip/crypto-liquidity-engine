@@ -8,13 +8,25 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from scipy.interpolate import RegularGridInterpolator
 
 
 # --- Theme constants ---
 BG = "#0b0f17"
-GRID = "rgba(255,255,255,0.05)"
+GRID = "rgba(255,255,255,0.04)"
+
+# Premium colorscale: deep purple -> blue -> cyan -> yellow
+LIQUIDITY_COLORSCALE = [
+    [0.00, "#1a0533"],
+    [0.15, "#2d1b69"],
+    [0.30, "#1b3a8a"],
+    [0.45, "#0e6fa0"],
+    [0.60, "#17a2b8"],
+    [0.75, "#20c9a0"],
+    [0.90, "#b8e04e"],
+    [1.00, "#f0e830"],
+]
 FONT = dict(family="Arial, sans-serif", color="#CCCCCC")
 AXIS_COMMON = dict(
     gridcolor=GRID,
@@ -73,7 +85,7 @@ def build_heatmap(
                 z=z,
                 x=np.concatenate([bid_prices, ask_prices]),
                 y=["Bids", "Asks"],
-                colorscale="Viridis",
+                colorscale=LIQUIDITY_COLORSCALE,
                 showscale=(i == 1),
                 colorbar=dict(
                     title=dict(text="Volume", font=dict(size=12, color="#AAAAAA")),
@@ -101,12 +113,57 @@ def build_heatmap(
 # ──────────────────────────────────────────────
 #  2. 3D Liquidity Surface
 # ──────────────────────────────────────────────
+def _detect_ridges(vol_smooth: np.ndarray, price_grid: np.ndarray, ex_fine: np.ndarray, exchanges: list[str]):
+    """
+    Find the top 3 volume peaks and return annotation dicts.
+    Labels are assigned based on position relative to the mid-price.
+    """
+    flat_idx = np.argsort(vol_smooth.ravel())[::-1]
+    annotations = []
+    labels = ["High Liquidity Zone", "Buy Pressure Region", "Sell Pressure Region"]
+    used = set()
+    mid_price = (price_grid[0] + price_grid[-1]) / 2
+
+    for idx in flat_idx:
+        if len(annotations) >= 3:
+            break
+        r, c = np.unravel_index(idx, vol_smooth.shape)
+        # Skip if too close to an existing annotation
+        key = (r // 4, c // 8)
+        if key in used:
+            continue
+        used.add(key)
+
+        price = price_grid[c]
+        ex_val = ex_fine[r]
+        z_val = vol_smooth[r, c]
+
+        # Pick label based on position
+        if not annotations:
+            label = labels[0]
+        elif price < mid_price:
+            label = labels[1]
+        else:
+            label = labels[2]
+
+        annotations.append(dict(
+            x=price, y=ex_val, z=z_val + 0.08,
+            text=label,
+            font=dict(size=12, color="#f0e830"),
+            showarrow=False,
+            bgcolor="rgba(11,15,23,0.7)",
+            borderpad=4,
+        ))
+
+    return annotations
+
+
 def build_3d_surface(
     processed: dict[str, tuple[pd.DataFrame, pd.DataFrame]],
 ) -> go.Figure:
     """
-    Create a 3D surface: X=price, Y=exchange index, Z=volume.
-    Interpolated for smooth rendering.
+    Create a premium 3D liquidity surface: X=price, Y=exchange, Z=volume.
+    Smoothed, interpolated, with ridge annotations and contour projection.
     """
     exchanges = list(processed.keys())
     n_exchanges = len(exchanges)
@@ -117,31 +174,30 @@ def build_3d_surface(
         all_prices.extend(bids["price"].tolist())
         all_prices.extend(asks["price"].tolist())
     price_min, price_max = min(all_prices), max(all_prices)
-    n_grid = 120
+    n_grid = 200  # finer grid for smoother surface
     price_grid = np.linspace(price_min, price_max, n_grid)
 
     # Build volume matrix: rows=exchanges, cols=price grid points
     vol_matrix = np.zeros((n_exchanges, n_grid))
     for i, (ex, (bids, asks)) in enumerate(processed.items()):
-        # Combine bids + asks into price->volume mapping
         prices = np.concatenate([bids["price"].values, asks["price"].values])
         vols = np.concatenate([bids["volume"].values, asks["volume"].values])
-        # Sort by price
         order = np.argsort(prices)
         prices, vols = prices[order], vols[order]
-        # Interpolate onto common grid
         vol_matrix[i] = np.interp(price_grid, prices, vols, left=0, right=0)
 
-    # Smooth and normalise
-    vol_matrix = gaussian_filter1d(vol_matrix, sigma=1.0, axis=1)
+    # Smooth along price axis
+    vol_matrix = gaussian_filter1d(vol_matrix, sigma=2.5, axis=1)
+
+    # Normalise
     vmax = vol_matrix.max()
     if vmax > 0:
         vol_matrix = vol_matrix / vmax
 
-    # Upsample exchange axis for smooth surface (3 exchanges -> more rows)
+    # Upsample exchange axis for fluid surface
     if n_exchanges >= 2:
         ex_orig = np.arange(n_exchanges)
-        ex_fine = np.linspace(0, n_exchanges - 1, max(n_exchanges * 8, 24))
+        ex_fine = np.linspace(0, n_exchanges - 1, max(n_exchanges * 12, 36))
         interp = RegularGridInterpolator(
             (ex_orig, np.arange(n_grid)), vol_matrix,
             method="linear", bounds_error=False, fill_value=0,
@@ -152,50 +208,88 @@ def build_3d_surface(
         ex_fine = np.array([0.0])
         vol_smooth = vol_matrix
 
+    # 2D Gaussian for final surface fluidity
+    vol_smooth = gaussian_filter(vol_smooth, sigma=1.5)
+
+    # Ridge annotations
+    annotations = _detect_ridges(vol_smooth, price_grid, ex_fine, exchanges)
+
     fig = go.Figure(
         data=[
             go.Surface(
                 x=price_grid,
                 y=ex_fine,
                 z=vol_smooth,
-                colorscale="Viridis",
-                opacity=0.92,
+                colorscale=LIQUIDITY_COLORSCALE,
+                opacity=0.93,
                 showscale=True,
                 colorbar=dict(
                     title=dict(text="Volume", side="right", font=dict(size=12, color="#AAAAAA")),
                     tickfont=dict(size=10, color="#888888"),
                     thickness=14,
-                    len=0.5,
+                    len=0.45,
+                    outlinewidth=0,
+                ),
+                lighting=dict(
+                    ambient=0.35,
+                    diffuse=0.55,
+                    specular=0.12,
+                    roughness=0.7,
+                ),
+                contours=dict(
+                    z=dict(
+                        show=True,
+                        usecolormap=True,
+                        highlightcolor="rgba(255,255,255,0.15)",
+                        project_z=True,
+                    ),
                 ),
             )
         ]
     )
 
-    # Tick labels for exchange axis
+    # Exchange tick labels
     tickvals = list(range(n_exchanges))
     ticktext = exchanges
 
+    axis_bg = "#0a0e16"
+
     fig.update_layout(
         title=dict(
-            text="3D Cross-Exchange Liquidity Surface",
-            font=dict(size=18, color="#DDDDDD"),
+            text=(
+                "Cross-Exchange Liquidity Surface<br>"
+                "<span style='font-size:13px;color:#888888'>"
+                "Real-Time Order Book Depth Analysis</span>"
+            ),
+            font=dict(size=19, color="#DDDDDD"),
             x=0.5,
         ),
         scene=dict(
-            xaxis=dict(title="Price (USDT)", gridcolor=GRID, color="#999999", backgroundcolor="#0e1218"),
-            yaxis=dict(
-                title="Exchange", gridcolor=GRID, color="#999999", backgroundcolor="#0e1218",
-                tickvals=tickvals, ticktext=ticktext,
+            xaxis=dict(
+                title=dict(text="Price (USDT)", font=dict(size=13)),
+                gridcolor=GRID, color="#999999", backgroundcolor=axis_bg,
+                nticks=8, tickfont=dict(size=10, color="#777777"),
             ),
-            zaxis=dict(title="Volume (norm.)", gridcolor=GRID, color="#999999", backgroundcolor="#0e1218"),
+            yaxis=dict(
+                title=dict(text="Exchange", font=dict(size=13)),
+                gridcolor=GRID, color="#999999", backgroundcolor=axis_bg,
+                tickvals=tickvals, ticktext=ticktext,
+                tickfont=dict(size=10, color="#777777"),
+            ),
+            zaxis=dict(
+                title=dict(text="Volume (norm.)", font=dict(size=13)),
+                gridcolor=GRID, color="#999999", backgroundcolor=axis_bg,
+                nticks=5, tickfont=dict(size=10, color="#777777"),
+            ),
             bgcolor=BG,
             aspectratio=dict(x=1.5, y=1.0, z=0.7),
-            camera=dict(eye=dict(x=1.4, y=1.3, z=0.8)),
+            camera=dict(eye=dict(x=1.35, y=1.25, z=0.85)),
+            annotations=annotations,
         ),
         paper_bgcolor=BG,
         plot_bgcolor=BG,
         font=FONT,
-        margin=dict(l=0, r=0, t=50, b=0),
+        margin=dict(l=0, r=0, t=70, b=0),
     )
     return fig
 

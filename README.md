@@ -2,6 +2,8 @@
 
 > Comparing order book depth, spread, and flow imbalance across major crypto exchanges
 
+![3D Liquidity Surface](output/3d_liquidity_preview.png)
+
 ## Overview
 
 Fetches live BTC/USDT order books from Binance, Coinbase, and Kraken, computes liquidity metrics, and generates interactive dashboards with depth heatmaps, a 3D liquidity surface, and imbalance charts.

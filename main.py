@@ -15,6 +15,7 @@ from src.visualizer import plot_metrics
 from src.advanced_visualizer import generate_all
 from src.time_collector import collect_snapshots
 from src.time_visualizer import generate_time_dashboard
+from src.threejs_visualizer import generate_threejs
 
 # --- Configuration ---
 MODE = "timeseries"       # "snapshot" or "timeseries"
@@ -66,6 +67,9 @@ def run_timeseries():
 
     print("\nBuilding time-aware dashboard...")
     generate_time_dashboard(data)
+
+    print("\nBuilding Three.js 3D visualization...")
+    generate_threejs(data)
 
 
 def _print_metrics(metrics):

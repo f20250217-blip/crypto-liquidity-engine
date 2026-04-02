@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>3D Liquidity Engine — BTC/USDT</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #05070a; overflow: hidden; font-family: 'Consolas','Menlo',monospace; }
+  canvas { display: block; }
+  #tooltip {
+    position: fixed; pointer-events: none; display: none;
+    background: rgba(8,12,20,0.92); border: 1px solid rgba(60,180,220,0.4);
+    color: #c8dce8; padding: 8px 12px; border-radius: 4px;
+    font-size: 12px; line-height: 1.5; z-index: 100;
+    backdrop-filter: blur(6px);
+  }
+  #tooltip .label { color: rgba(100,200,240,0.9); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  #tooltip .val { color: #e0f0ff; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="tooltip"></div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+/* ─────────────────── Data ─────────────────── */
+const D = {"exchanges":["Binance","Coinbase"],"profiles":{"Binance":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0001,0.0004,0.0023,0.0084,0.0224,0.0453,0.0737,0.1034,0.1325,0.1611,0.1894,0.2176,0.2456,0.2732,0.3012,0.3313,0.3668,0.4117,0.4698,0.5431,0.6305,0.7267,0.8232,0.9084,0.9706,1.0,0.9916,0.9464,0.872,0.78,0.6829,0.5909,0.5091,0.4378,0.3739,0.314,0.2559,0.199,0.1445,0.0945,0.053,0.0241,0.0084,0.0021,0.0004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"Coinbase":[0.0,0.0,0.0,0.0,0.0005,0.0036,0.0188,0.0669,0.1661,0.3009,0.4197,0.4784,0.4703,0.4181,0.3587,0.3325,0.3672,0.464,0.6,0.7444,0.8707,0.9601,1.0,0.9828,0.9052,0.7681,0.5808,0.3715,0.1888,0.0718,0.0194,0.0036,0.0004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0002,0.0016,0.0085,0.0311,0.0793,0.1474,0.2085,0.2337,0.2129,0.1576,0.0926,0.0418,0.014,0.0035,0.0017,0.0064,0.0242,0.0664,0.1382,0.2308,0.3282,0.4171,0.4897,0.5411,0.5672,0.5628,0.5191,0.4274,0.2954,0.1599,0.0637,0.0178,0.0034,0.0004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]},"n_bins":120,"price_labels":[{"idx":0,"val":68124.33},{"idx":15,"val":68153.45},{"idx":30,"val":68182.57},{"idx":45,"val":68211.69},{"idx":60,"val":68240.81},{"idx":75,"val":68269.93},{"idx":90,"val":68299.05},{"idx":105,"val":68328.17}],"price_range":[68124.33,68355.35],"bid_ask":{"Binance":{"bid_idx":50.1,"ask_idx":60.0,"bid_price":68221.4,"ask_price":68240.81},"Coinbase":{"bid_idx":3.0,"ask_idx":71.4,"bid_price":68130.15,"ask_price":68262.17}},"raw_maxes":{"Binance":0.1871,"Coinbase":0.4971}};
+const EXCHANGES = D.exchanges;
+const N_BINS = D.n_bins;
+const PROFILES = D.profiles;
+const PRICE_LABELS = D.price_labels;
+const BID_ASK = D.bid_ask;
+
+/* ─────────────────── Layout constants ─────────────────── */
+const SURFACE_W = 12;          // X span (price axis)
+const STRIP_D = 2.5;           // Z depth per exchange strip
+const GAP = 1.2;               // Z gap between strips
+const HSCALE = 2.2;            // Y height multiplier
+const BG = 0x05070a;
+const TOTAL_D = EXCHANGES.length * STRIP_D + (EXCHANGES.length - 1) * GAP;
+
+/* ─────────────────── Color ramp ─────────────────── */
+const STOPS = [
+  [0.00, 0.04, 0.02, 0.08],
+  [0.15, 0.06, 0.06, 0.28],
+  [0.30, 0.05, 0.15, 0.48],
+  [0.48, 0.04, 0.32, 0.62],
+  [0.62, 0.03, 0.50, 0.68],
+  [0.76, 0.12, 0.68, 0.52],
+  [0.88, 0.50, 0.82, 0.28],
+  [0.96, 0.80, 0.90, 0.16],
+  [1.00, 0.92, 0.94, 0.12],
+];
+
+function colorAt(t) {
+  t = Math.max(0, Math.min(1, t));
+  let lo = STOPS[0], hi = STOPS[STOPS.length - 1];
+  for (let i = 0; i < STOPS.length - 1; i++) {
+    if (t >= STOPS[i][0] && t <= STOPS[i + 1][0]) { lo = STOPS[i]; hi = STOPS[i + 1]; break; }
+  }
+  const f = hi[0] > lo[0] ? (t - lo[0]) / (hi[0] - lo[0]) : 0;
+  return new THREE.Color(lo[1]+(hi[1]-lo[1])*f, lo[2]+(hi[2]-lo[2])*f, lo[3]+(hi[3]-lo[3])*f);
+}
+
+/* ─────────────────── WebGL Renderer ─────────────────── */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+/* ─────────────────── CSS2D label renderer ─────────────────── */
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.body.appendChild(labelRenderer.domElement);
+
+/* ─────────────────── Scene ─────────────────── */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.FogExp2(BG, 0.025);
+
+/* ─────────────────── Camera ─────────────────── */
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 300);
+camera.position.set(10, 7, 14);
+
+/* ─────────────────── Controls ─────────────────── */
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.minDistance = 4;
+controls.maxDistance = 40;
+controls.maxPolarAngle = Math.PI * 0.47;
+controls.target.set(0, 0.8, TOTAL_D * 0.3);
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.25;
+
+/* ─────────────────── Helper: make CSS2D label ─────────────────── */
+function makeLabel(text, fontSize, color, bold) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.cssText = `color:${color};font-family:Consolas,Menlo,monospace;font-size:${fontSize}px;${bold?'font-weight:600;':''}white-space:nowrap;pointer-events:none;text-shadow:0 0 6px rgba(0,0,0,0.8);`;
+  const obj = new CSS2DObject(div);
+  return obj;
+}
+
+/* ─────────────────── Axes ─────────────────── */
+const axisColor = 0x2a3a55;
+const axisMat = new THREE.LineBasicMaterial({ color: axisColor, transparent: true, opacity: 0.7 });
+const tickMat = new THREE.LineBasicMaterial({ color: 0x3a5070, transparent: true, opacity: 0.5 });
+
+// X axis (Price) — along bottom front
+const xLen = SURFACE_W;
+const xOrigin = new THREE.Vector3(-xLen/2, 0, -0.3);
+const xAxisGeo = new THREE.BufferGeometry().setFromPoints([
+  xOrigin, new THREE.Vector3(xLen/2, 0, -0.3)
+]);
+scene.add(new THREE.Line(xAxisGeo, axisMat));
+
+// X axis title
+const xTitle = makeLabel('Price (USDT)', 11, '#4a7a9a', true);
+xTitle.position.set(0, -0.15, -1.0);
+scene.add(xTitle);
+
+// X tick marks + labels
+PRICE_LABELS.forEach(pl => {
+  const xPos = -xLen/2 + (pl.idx / N_BINS) * xLen;
+  const tickGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(xPos, 0, -0.3),
+    new THREE.Vector3(xPos, -0.15, -0.3)
+  ]);
+  scene.add(new THREE.Line(tickGeo, tickMat));
+
+  const lbl = makeLabel(pl.val.toLocaleString(), 9, '#5588aa', false);
+  lbl.position.set(xPos, -0.35, -0.3);
+  scene.add(lbl);
+});
+
+// Y axis (Volume) — vertical at left
+const yLen = HSCALE * 1.1;
+const yAxisGeo = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-xLen/2 - 0.3, 0, -0.3),
+  new THREE.Vector3(-xLen/2 - 0.3, yLen, -0.3)
+]);
+scene.add(new THREE.Line(yAxisGeo, axisMat));
+
+// Y axis title
+const yTitle = makeLabel('Volume', 11, '#4a7a9a', true);
+yTitle.position.set(-xLen/2 - 0.8, yLen * 0.55, -0.3);
+scene.add(yTitle);
+
+// Y tick marks (5 levels)
+for (let i = 0; i <= 4; i++) {
+  const yPos = (i / 4) * yLen;
+  const tickGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-xLen/2 - 0.3, yPos, -0.3),
+    new THREE.Vector3(-xLen/2 - 0.5, yPos, -0.3)
+  ]);
+  scene.add(new THREE.Line(tickGeo, tickMat));
+
+  const pct = Math.round((i / 4) * 100);
+  const lbl = makeLabel(pct + '%', 9, '#5588aa', false);
+  lbl.position.set(-xLen/2 - 0.75, yPos, -0.3);
+  scene.add(lbl);
+}
+
+// Z axis (Exchange) — along left side going back
+const zAxisGeo = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-xLen/2 - 0.3, 0, -0.3),
+  new THREE.Vector3(-xLen/2 - 0.3, 0, TOTAL_D + 0.3)
+]);
+scene.add(new THREE.Line(zAxisGeo, axisMat));
+
+// Z axis title
+const zTitle = makeLabel('Exchange', 11, '#4a7a9a', true);
+zTitle.position.set(-xLen/2 - 0.8, -0.15, TOTAL_D * 0.5);
+scene.add(zTitle);
+
+/* ─────────────────── Exchange colors for labels ─────────────────── */
+const EX_COLORS = { 'Binance': '#f0b90b', 'Coinbase': '#0052ff', 'Kraken': '#7b3fe4' };
+
+/* ─────────────────── Build per-exchange surfaces ─────────────────── */
+const surfaces = [];
+const STRIP_ROWS = 20;   // subdivisions in Z per strip
+
+EXCHANGES.forEach((ex, exIdx) => {
+  const profile = PROFILES[ex];
+  const zStart = exIdx * (STRIP_D + GAP);
+  const zEnd = zStart + STRIP_D;
+
+  // PlaneGeometry: width segments = N_BINS-1, height segments = STRIP_ROWS-1
+  const geo = new THREE.PlaneGeometry(SURFACE_W, STRIP_D, N_BINS - 1, STRIP_ROWS - 1);
+  geo.rotateX(-Math.PI / 2);
+
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+
+  for (let i = 0; i < pos.count; i++) {
+    const col = i % N_BINS;
+    const row = Math.floor(i / N_BINS);
+    const h = profile[col];
+
+    // Taper edges of strip for smooth falloff at exchange boundaries
+    const rowT = row / (STRIP_ROWS - 1);
+    const edgeFade = Math.sin(rowT * Math.PI);  // 0→1→0
+    const finalH = h * edgeFade;
+
+    pos.setY(i, finalH * HSCALE);
+    pos.setZ(i, pos.getZ(i) + zStart + STRIP_D / 2);
+
+    const c = colorAt(finalH);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.45,
+    metalness: 0.08,
+    flatShading: false,
+    side: THREE.DoubleSide,
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData = { exchange: ex, profile: profile };
+  scene.add(mesh);
+  surfaces.push(mesh);
+
+  // Exchange label on Z axis
+  const exColor = EX_COLORS[ex] || '#88aacc';
+  const exLabel = makeLabel(ex, 12, exColor, true);
+  exLabel.position.set(-xLen/2 - 0.6, 0.1, zStart + STRIP_D / 2);
+  scene.add(exLabel);
+
+  // Z tick mark
+  const zTickGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-xLen/2 - 0.3, 0, zStart + STRIP_D / 2),
+    new THREE.Vector3(-xLen/2 - 0.5, 0, zStart + STRIP_D / 2)
+  ]);
+  scene.add(new THREE.Line(zTickGeo, tickMat));
+});
+
+/* ─────────────────── Bid/Ask indicator lines ─────────────────── */
+const bidAskGroup = new THREE.Group();
+scene.add(bidAskGroup);
+
+EXCHANGES.forEach((ex, exIdx) => {
+  const ba = BID_ASK[ex];
+  if (!ba) return;
+  const zStart = exIdx * (STRIP_D + GAP);
+  const zMid = zStart + STRIP_D / 2;
+
+  // Bid line (green)
+  const bidX = -SURFACE_W/2 + (ba.bid_idx / N_BINS) * SURFACE_W;
+  const bidGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(bidX, 0, zMid - STRIP_D/2),
+    new THREE.Vector3(bidX, HSCALE * 0.3, zMid),
+    new THREE.Vector3(bidX, 0, zMid + STRIP_D/2),
+  ]);
+  const bidLine = new THREE.Line(bidGeo, new THREE.LineBasicMaterial({
+    color: 0x00cc66, transparent: true, opacity: 0.6
+  }));
+  bidAskGroup.add(bidLine);
+
+  // Ask line (red)
+  const askX = -SURFACE_W/2 + (ba.ask_idx / N_BINS) * SURFACE_W;
+  const askGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(askX, 0, zMid - STRIP_D/2),
+    new THREE.Vector3(askX, HSCALE * 0.3, zMid),
+    new THREE.Vector3(askX, 0, zMid + STRIP_D/2),
+  ]);
+  const askLine = new THREE.Line(askGeo, new THREE.LineBasicMaterial({
+    color: 0xff4444, transparent: true, opacity: 0.6
+  }));
+  bidAskGroup.add(askLine);
+});
+
+/* ─────────────────── Grid floor ─────────────────── */
+const gridHelper = new THREE.GridHelper(20, 30, 0x141e30, 0x0c1420);
+gridHelper.position.set(0, -0.02, TOTAL_D * 0.4);
+gridHelper.material.transparent = true;
+gridHelper.material.opacity = 0.2;
+scene.add(gridHelper);
+
+/* ─────────────────── Subtle floor plane ─────────────────── */
+const floorGeo = new THREE.PlaneGeometry(SURFACE_W * 1.6, TOTAL_D * 1.6);
+floorGeo.rotateX(-Math.PI / 2);
+const floorMat = new THREE.MeshStandardMaterial({
+  color: BG, roughness: 0.6, metalness: 0.3,
+  transparent: true, opacity: 0.25,
+});
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.position.set(0, -0.04, TOTAL_D * 0.4);
+floor.receiveShadow = true;
+scene.add(floor);
+
+/* ─────────────────── Lighting ─────────────────── */
+// Ambient — low, neutral
+const amb = new THREE.AmbientLight(0x1a1a28, 0.6);
+scene.add(amb);
+
+// Key — top-left, white-blue, casts shadows
+const key = new THREE.DirectionalLight(0xe8eeff, 1.3);
+key.position.set(8, 14, 4);
+key.castShadow = true;
+key.shadow.mapSize.width = 1024;
+key.shadow.mapSize.height = 1024;
+key.shadow.camera.near = 1;
+key.shadow.camera.far = 35;
+key.shadow.camera.left = -12;
+key.shadow.camera.right = 12;
+key.shadow.camera.top = 12;
+key.shadow.camera.bottom = -12;
+key.shadow.bias = -0.002;
+scene.add(key);
+
+// Fill — opposite side, cool
+const fill = new THREE.DirectionalLight(0x3355aa, 0.4);
+fill.position.set(-7, 6, -5);
+scene.add(fill);
+
+// Rim — subtle backlight
+const rim = new THREE.DirectionalLight(0x554488, 0.25);
+rim.position.set(0, 4, -10);
+scene.add(rim);
+
+/* ─────────────────── Raycaster tooltip ─────────────────── */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tooltip = document.getElementById('tooltip');
+
+renderer.domElement.addEventListener('mousemove', (e) => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(surfaces);
+
+  if (hits.length > 0) {
+    const hit = hits[0];
+    const ex = hit.object.userData.exchange;
+    const pt = hit.point;
+
+    // Map X back to price
+    const priceT = (pt.x + SURFACE_W / 2) / SURFACE_W;
+    const price = D.price_range[0] + priceT * (D.price_range[1] - D.price_range[0]);
+
+    // Map Y back to volume %
+    const volPct = Math.max(0, (pt.y / HSCALE) * 100);
+
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX + 16) + 'px';
+    tooltip.style.top = (e.clientY - 10) + 'px';
+    tooltip.innerHTML = `<div class="label">Exchange</div><div class="val">${ex}</div>`
+      + `<div class="label" style="margin-top:4px">Price</div><div class="val">${price.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})} USDT</div>`
+      + `<div class="label" style="margin-top:4px">Relative Volume</div><div class="val">${volPct.toFixed(1)}%</div>`;
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+
+renderer.domElement.addEventListener('mouseleave', () => {
+  tooltip.style.display = 'none';
+});
+
+/* ─────────────────── Render loop ─────────────────── */
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+animate();
+
+/* ─────────────────── Resize ─────────────────── */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  labelRenderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>

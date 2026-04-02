@@ -36,8 +36,11 @@ def run():
         metrics = compute_all_metrics(processed)
         _print_metrics(metrics)
 
-    print("\nBuilding Three.js 3D visualization...")
+    print("\nBuilding 3D liquidity engine...")
     generate_threejs(data)
+    print("\nOutputs:")
+    print("  Interactive 3D  → output/3d_liquidity_pro.html")
+    print("  Dashboard       → output/dashboard.html")
 
 
 def _print_metrics(metrics):

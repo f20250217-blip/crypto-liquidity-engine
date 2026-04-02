@@ -1,31 +1,41 @@
 # Cross-Exchange Crypto Liquidity & Order Flow Engine
 
-> Comparing order book depth, spread, and flow imbalance across major crypto exchanges
+Real-time order book depth analysis across Binance, Coinbase, and Kraken with interactive 3D visualization.
 
-## 3D Liquidity Visualization
+## 3D Liquidity Surface
 
-![3D Preview](output/3d_preview.png)
+![3D Liquidity Engine](output/3d_preview.png)
 
-Interactive 3D version available locally: open `output/3d_liquidity_premium.html`
+Interactive version: open `output/3d_liquidity_pro.html` locally after running the pipeline.
 
-## Overview
+## What It Shows
 
-Collects time-series order book data from Binance, Coinbase, and Kraken, then builds an interactive Three.js 3D surface showing how liquidity evolves over time — with vertex-displaced geometry, custom color gradients, and cinematic lighting.
+The 3D surface maps **order book liquidity** across three dimensions:
+
+| Axis | Dimension | Description |
+|------|-----------|-------------|
+| **X** | Price (USDT) | BTC/USDT price range across all observed levels |
+| **Z** | Exchange | Binance, Coinbase, Kraken — each as a separate surface strip |
+| **Y** | Volume | Aggregated order book depth at each price level |
+
+Peaks represent **liquidity walls** — price levels where large volumes of orders are concentrated. The color gradient maps volume intensity from dark purple (low) through blue and cyan to yellow (extreme).
 
 ## Features
 
-- Time-series order book collection (30 samples at configurable intervals)
-- Cross-exchange volume aggregation across 400 price bins
-- WebGL 3D liquidity surface with bilinear-interpolated, Gaussian-smoothed height data
-- Per-exchange order flow imbalance tracking
-- Console metrics: spread, depth, imbalance per exchange
+- Time-series order book collection (configurable sample count and interval)
+- Per-exchange depth profiles with noise suppression and ridge extraction
+- Multi-exchange 3D surface with labeled axes, tick marks, and price labels
+- Bid/ask indicator lines per exchange
+- Hover tooltips showing exchange, price, and relative volume
+- Multi-panel dashboard with imbalance sparklines
+- Interactive WebGL camera (rotate, zoom, pan)
 
 ## Metrics
 
 | Metric | Description |
 |--------|-------------|
 | Best Bid / Ask | Top-of-book prices |
-| Spread | Ask minus bid (absolute and bps) |
+| Spread | Ask minus bid (absolute and basis points) |
 | Bid / Ask Volume | Total volume across top N levels |
 | Imbalance | (bid_vol - ask_vol) / total_vol |
 
@@ -45,35 +55,26 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Configure collection in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10), `LIMIT` (default 50).
+Configure in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10), `LIMIT` (default 50).
 
 ## Output
 
-### Console
-
-Formatted table with per-exchange metrics (best bid/ask, spread, volumes, imbalance).
-
-### 3D Liquidity Surface
-
-`output/3d_liquidity_premium.html` — self-contained WebGL visualization:
-
-- **PlaneGeometry** with 140x100 vertex grid displaced by aggregated volume
-- **9-stop color gradient** (purple → blue → cyan → green → yellow) mapped to height
-- **3-point lighting** (key, fill, rim) with ACES filmic tone mapping
-- **OrbitControls** for interactive camera rotation and zoom
-- **Fog and reflection plane** for depth and atmosphere
+| File | Description |
+|------|-------------|
+| `output/3d_liquidity_pro.html` | Interactive 3D liquidity surface (WebGL) |
+| `output/dashboard.html` | Multi-panel dashboard with 3D view + metrics + sparklines |
 
 ## Project Structure
 
 ```
 crypto-liquidity-engine/
 ├── src/
-│   ├── data_fetcher.py          # Multi-exchange order book retrieval
-│   ├── orderbook_processor.py   # Bid/ask extraction
-│   ├── metrics.py               # Liquidity and imbalance computation
+│   ├── data_fetcher.py          # Multi-exchange order book retrieval (ccxt)
+│   ├── orderbook_processor.py   # Bid/ask DataFrame extraction
+│   ├── metrics.py               # Spread, volume, imbalance computation
 │   ├── time_collector.py        # Time-series snapshot collector
-│   └── threejs_visualizer.py    # Three.js WebGL 3D surface generator
-├── output/                      # Generated outputs
+│   └── threejs_visualizer.py    # 3D engine + dashboard generator
+├── output/                      # Generated visualizations
 ├── main.py                      # Pipeline entry point
 ├── requirements.txt
 └── README.md

@@ -24,17 +24,16 @@ The 3D surface maps **order book liquidity** across three dimensions:
 
 **Cross-exchange comparison** — Separated flat-shaded strips let you compare depth structure across exchanges. Matching peaks signal consensus support/resistance.
 
-**Heatmap** — Dark blue (low) through cyan (high) to bright yellow (extreme concentration). Flat shading preserves the grid structure for analytical readability.
+**Heatmap** — Dark blue-gray (low) through blue and cyan (high) to soft yellow (extreme concentration).
 
 ## Features
 
 - Time-series order book collection (configurable sample count and interval)
-- 120-bin depth profiles with aggressive noise removal (top 25% signal only)
-- Flat-shaded grid surfaces with wireframe overlay
-- Automated liquidity wall detection — only dominant peaks shown
-- Vertical drop lines from peak structures to floor
-- Professional heatmap: dark blue → cyan → yellow
-- Hover tooltips: exchange, price, volume
+- 200-bin smooth depth profiles with noise removal (top 35% signal)
+- Smooth-shaded surfaces with natural curves
+- Automated liquidity wall detection — top 3 peaks labeled with drop lines
+- Professional heatmap: #1E2A38 → #2F6FA3 → #4FD1C5 → #F6E05E
+- Hover tooltips: exchange, price, volume, wall detection
 - Multi-panel dashboard with imbalance sparklines
 
 ## Metrics

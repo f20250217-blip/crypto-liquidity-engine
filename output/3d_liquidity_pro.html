@@ -5,28 +5,27 @@
 <title>3D Liquidity Engine — BTC/USDT</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#0F1115; overflow:hidden; font-family:'Consolas','SF Mono','Menlo',monospace; }
+  body { background:#0F172A; overflow:hidden; font-family:'Consolas','SF Mono','Menlo',monospace; }
   canvas { display:block; }
 
   #tooltip {
     position:fixed; pointer-events:none; display:none;
-    background:rgba(15,17,21,0.95); border:1px solid rgba(80,200,230,0.3);
-    color:#c0d8e8; padding:10px 14px; border-radius:3px;
+    background:rgba(15,23,42,0.94); border:1px solid rgba(79,209,197,0.25);
+    color:#c0d8e8; padding:10px 14px; border-radius:4px;
     font-size:11px; line-height:1.6; z-index:100;
-    min-width:160px; font-family:'Consolas','SF Mono',monospace;
+    min-width:155px; font-family:'Consolas','SF Mono',monospace;
   }
-  #tooltip .t-label { color:rgba(80,200,230,0.5); font-size:9px; text-transform:uppercase; letter-spacing:0.8px; }
-  #tooltip .t-val { color:#e0f4ff; font-size:12px; font-weight:600; }
+  #tooltip .t-label { color:rgba(79,209,197,0.5); font-size:9px; text-transform:uppercase; letter-spacing:0.7px; }
+  #tooltip .t-val { color:#e2e8f0; font-size:12px; font-weight:600; }
   #tooltip .t-row { margin-top:3px; }
-  #tooltip .t-wall { color:#f0d040; font-size:9px; margin-top:5px; font-weight:700; }
+  #tooltip .t-wall { color:#F6E05E; font-size:9px; margin-top:5px; font-weight:700; }
 
   #info {
     position:fixed; top:14px; left:16px; z-index:90;
-    font-size:10px; color:rgba(180,200,220,0.35);
+    font-size:10px; color:rgba(148,163,184,0.4);
     font-family:'Consolas','SF Mono',monospace;
-    letter-spacing:0.3px;
   }
-  #info span { color:rgba(80,200,230,0.5); }
+  #info span { color:rgba(79,209,197,0.45); }
 </style>
 </head>
 <body>
@@ -46,45 +45,45 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const D = {"exchanges":["Binance","Coinbase","Kraken"],"profiles":{"Binance":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0001,0.0006,0.0026,0.0058,0.0086,0.0075,0.0032,0.0007,0.0014,0.0103,0.0339,0.0607,0.0713,0.0606,0.0403,0.0259,0.0244,0.034,0.0532,0.0849,0.1202,0.1395,0.1401,0.1482,0.2199,0.424,0.7462,1.0,0.9748,0.7037,0.4075,0.2114,0.0977,0.0334,0.0064,0.0005,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"Coinbase":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0001,0.0043,0.0516,0.1953,0.3487,0.3704,0.2462,0.0893,0.015,0.001,0.0001,0.004,0.0458,0.1404,0.17,0.1109,0.0775,0.1321,0.1797,0.1419,0.0972,0.0952,0.071,0.0269,0.0623,0.2782,0.6645,0.9924,1.0,0.7,0.3604,0.1426,0.0367,0.041,0.1427,0.2477,0.2652,0.2223,0.1691,0.0971,0.0274,0.0023,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0011,0.0083,0.0168,0.0076,0.0007,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"Kraken":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0006,0.0123,0.0959,0.2603,0.2952,0.1703,0.0448,0.0037,0.0001,0.0002,0.011,0.1233,0.3589,0.3654,0.1396,0.0252,0.0775,0.2276,0.236,0.083,0.0075,0.0001,0.0,0.0,0.0,0.0003,0.0034,0.0079,0.0121,0.0681,0.1893,0.2146,0.1047,0.0216,0.0016,0.0,0.0001,0.0057,0.0614,0.1559,0.1191,0.0481,0.1806,0.6297,1.0,0.9109,0.5543,0.3207,0.2502,0.1681,0.068,0.0315,0.0259,0.0139,0.0485,0.1522,0.1848,0.0875,0.0162,0.0011,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]},"n_bins":120,"price_labels":[{"idx":0,"val":65917.4},{"idx":15,"val":65958.74},{"idx":30,"val":66000.09},{"idx":45,"val":66041.43},{"idx":60,"val":66082.78},{"idx":75,"val":66124.12},{"idx":90,"val":66165.47},{"idx":105,"val":66206.81}],"price_range":[65917.4,66245.4],"mid_price":66081.4,"walls":{"Binance":[{"idx":71,"height":1.0,"price":66113.1,"is_top":true}],"Coinbase":[{"idx":44,"height":1.0,"price":66038.68,"is_top":true}],"Kraken":[{"idx":86,"height":1.0,"price":66154.44,"is_top":true}]},"avg_imbalances":{"Binance":-0.1793,"Coinbase":0.2643,"Kraken":-0.0024}};
+const D = {"exchanges":["Binance","Coinbase","Kraken"],"profiles":{"Binance":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0002,0.0011,0.0043,0.0126,0.029,0.0555,0.0931,0.1413,0.1978,0.2588,0.3203,0.3796,0.4352,0.4856,0.5276,0.5557,0.5634,0.5462,0.5062,0.4543,0.4084,0.3872,0.401,0.4488,0.5225,0.6132,0.7136,0.8152,0.9058,0.9713,1.0,0.9864,0.9325,0.8463,0.7399,0.626,0.5157,0.4181,0.3395,0.2829,0.2477,0.2289,0.22,0.2148,0.2094,0.2022,0.1925,0.18,0.1648,0.1488,0.1368,0.1361,0.1532,0.1905,0.2436,0.3028,0.3561,0.3929,0.4066,0.3964,0.3663,0.3238,0.2773,0.2336,0.1963,0.1655,0.1396,0.1164,0.0946,0.0743,0.0556,0.039,0.0248,0.0137,0.0061,0.0021,0.0005,0.0001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"Coinbase":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0005,0.0041,0.0222,0.0817,0.2134,0.4155,0.6406,0.8315,0.9546,1.0,0.9714,0.8817,0.7479,0.5863,0.4127,0.2491,0.1251,0.0639,0.0685,0.1228,0.1974,0.2612,0.2967,0.3041,0.2917,0.2698,0.2542,0.2688,0.334,0.4471,0.5777,0.6829,0.7265,0.6903,0.5773,0.4135,0.2452,0.1221,0.0726,0.0927,0.1521,0.2121,0.2494,0.2644,0.2706,0.2824,0.3077,0.3448,0.382,0.403,0.3925,0.343,0.2595,0.1624,0.0799,0.0294,0.0078,0.0016,0.0014,0.0066,0.0236,0.0594,0.1105,0.1646,0.216,0.2711,0.3364,0.4068,0.4668,0.498,0.487,0.4288,0.3298,0.2117,0.1074,0.0424,0.0214,0.0402,0.0984,0.1881,0.2865,0.3724,0.438,0.4828,0.5048,0.4997,0.4631,0.3938,0.297,0.189,0.0955,0.0361,0.0097,0.0018,0.0002,0.0,0.0001,0.001,0.005,0.0179,0.0439,0.0752,0.0914,0.079,0.0482,0.0204,0.0059,0.0011,0.0001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0003,0.0015,0.0046,0.0089,0.0111,0.0089,0.0046,0.0015,0.0003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"Kraken":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0001,0.0006,0.0035,0.0139,0.0384,0.0765,0.1119,0.1248,0.1192,0.1292,0.1889,0.2986,0.4297,0.552,0.6511,0.7281,0.7921,0.8512,0.9063,0.9504,0.9718,0.9583,0.9007,0.7952,0.6454,0.4655,0.2841,0.1385,0.0509,0.0134,0.0024,0.0003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0002,0.0018,0.0099,0.0368,0.0976,0.1918,0.2942,0.3717,0.4072,0.405,0.3804,0.3486,0.3172,0.2846,0.2431,0.187,0.1212,0.0622,0.0253,0.0157,0.0352,0.0888,0.173,0.2716,0.3704,0.4681,0.568,0.6668,0.7529,0.8116,0.8326,0.8154,0.771,0.7176,0.6733,0.6493,0.6486,0.6699,0.7116,0.7717,0.8439,0.9159,0.9723,1.0,0.9926,0.9496,0.8728,0.7663,0.6417,0.5276,0.4677,0.4955,0.6044,0.7436,0.8462,0.8608,0.7669,0.5818,0.3613,0.1753,0.0634,0.0164,0.003,0.0004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]},"n_bins":200,"price_labels":[{"idx":0,"val":65870.51},{"idx":33,"val":65929.99},{"idx":66,"val":65989.47},{"idx":99,"val":66048.95},{"idx":132,"val":66108.44},{"idx":165,"val":66167.92},{"idx":198,"val":66227.4}],"price_range":[65870.51,66229.2],"mid_price":66049.85,"walls":{"Binance":[{"idx":88,"height":1.0,"price":66029.13,"exchange":"Binance","show_label":true},{"idx":116,"height":0.407,"price":66079.6,"exchange":"Binance","show_label":false}],"Coinbase":[{"idx":17,"height":1.0,"price":65901.15,"exchange":"Coinbase","show_label":true},{"idx":40,"height":0.726,"price":65942.61,"exchange":"Coinbase","show_label":false},{"idx":92,"height":0.505,"price":66036.34,"exchange":"Coinbase","show_label":false},{"idx":57,"height":0.403,"price":65973.25,"exchange":"Coinbase","show_label":false}],"Kraken":[{"idx":125,"height":1.0,"price":66095.82,"exchange":"Kraken","show_label":true},{"idx":63,"height":0.972,"price":65984.07,"exchange":"Kraken","show_label":false},{"idx":90,"height":0.407,"price":66032.73,"exchange":"Kraken","show_label":false}]},"avg_imbalances":{"Binance":0.0618,"Coinbase":0.2944,"Kraken":-0.0109}};
 const EX = D.exchanges;
 const NB = D.n_bins;
 const PROF = D.profiles;
 const WALLS = D.walls;
 
 /* ═══════ LAYOUT ═══════ */
-const SW = 16;
-const SD = 3.5;
-const GAP = 0.6;
-const HY = 3.2;
-const BG = 0x0F1115;
+const SW = 15;
+const SD = 3.0;
+const GAP = 1.0;
+const HY = 2.8;
+const BG = 0x0F172A;
 const TD = EX.length * SD + (EX.length - 1) * GAP;
-const SROWS = 20;
+const SROWS = 22;
 
-/* ═══════ HEATMAP: dark-blue → blue → cyan → yellow ═══════ */
+/* ═══════ COLOR: #1E2A38 → #2F6FA3 → #4FD1C5 → #F6E05E ═══════ */
 const CS = [
-  [0.00, 0.04, 0.06, 0.18],
-  [0.20, 0.06, 0.12, 0.35],
-  [0.40, 0.08, 0.25, 0.55],
-  [0.55, 0.10, 0.45, 0.70],
-  [0.70, 0.15, 0.65, 0.80],
-  [0.82, 0.30, 0.82, 0.85],
-  [0.92, 0.70, 0.92, 0.40],
-  [1.00, 0.95, 0.88, 0.15],
+  [0.00, 0.118, 0.165, 0.220],
+  [0.33, 0.184, 0.435, 0.640],
+  [0.66, 0.310, 0.820, 0.773],
+  [1.00, 0.965, 0.878, 0.369],
 ];
 
 function colorAt(t) {
   t = Math.max(0, Math.min(1, t));
-  let lo = CS[0], hi = CS[CS.length-1];
-  for (let i = 0; i < CS.length-1; i++) {
-    if (t >= CS[i][0] && t <= CS[i+1][0]) { lo=CS[i]; hi=CS[i+1]; break; }
+  let lo = CS[0], hi = CS[CS.length - 1];
+  for (let i = 0; i < CS.length - 1; i++) {
+    if (t >= CS[i][0] && t <= CS[i + 1][0]) { lo = CS[i]; hi = CS[i + 1]; break; }
   }
-  const f = hi[0]>lo[0] ? (t-lo[0])/(hi[0]-lo[0]) : 0;
-  return new THREE.Color(lo[1]+(hi[1]-lo[1])*f, lo[2]+(hi[2]-lo[2])*f, lo[3]+(hi[3]-lo[3])*f);
+  const f = hi[0] > lo[0] ? (t - lo[0]) / (hi[0] - lo[0]) : 0;
+  return new THREE.Color(
+    lo[1] + (hi[1] - lo[1]) * f,
+    lo[2] + (hi[2] - lo[2]) * f,
+    lo[3] + (hi[3] - lo[3]) * f
+  );
 }
 
 /* ═══════ RENDERER ═══════ */
-const renderer = new THREE.WebGLRenderer({ antialias:true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -101,79 +100,74 @@ document.body.appendChild(labelR.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 
-/* ═══════ CAMERA — analytical angle, low distortion ═══════ */
-const camera = new THREE.PerspectiveCamera(35, window.innerWidth/window.innerHeight, 0.1, 500);
-camera.position.set(14, 10, TD + 12);
+/* ═══════ CAMERA — balanced, ~80% frame fill ═══════ */
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 400);
+camera.position.set(10, 7, TD + 8);
 
 /* ═══════ CONTROLS ═══════ */
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.minDistance = 8;
-controls.maxDistance = 50;
-controls.maxPolarAngle = Math.PI * 0.42;
-controls.target.set(0, 0.8, TD * 0.42);
+controls.dampingFactor = 0.06;
+controls.minDistance = 6;
+controls.maxDistance = 40;
+controls.maxPolarAngle = Math.PI * 0.44;
+controls.target.set(0, 0.5, TD * 0.42);
 controls.autoRotate = true;
-controls.autoRotateSpeed = 0.12;
+controls.autoRotateSpeed = 0.15;
 
 /* ═══════ HELPERS ═══════ */
 function mkLabel(text, size, color, bold) {
   const d = document.createElement('div');
   d.textContent = text;
-  d.style.cssText = `color:${color};font-family:'Consolas','SF Mono',monospace;font-size:${size}px;${bold?'font-weight:700;':''}white-space:nowrap;pointer-events:none;`;
+  d.style.cssText = `color:${color};font-family:'Consolas','SF Mono',monospace;font-size:${size}px;${bold ? 'font-weight:600;' : ''}white-space:nowrap;pointer-events:none;`;
   return new CSS2DObject(d);
 }
 
-function xWorld(binIdx) { return -SW/2 + (binIdx/NB) * SW; }
+function xWorld(binIdx) { return -SW / 2 + (binIdx / NB) * SW; }
 
 function addLine(pts, mat) {
   const g = new THREE.BufferGeometry().setFromPoints(pts);
   scene.add(new THREE.Line(g, mat));
 }
 
-/* ═══════ AXIS MATERIALS ═══════ */
-const axisMain = new THREE.LineBasicMaterial({ color:0xffffff, transparent:true, opacity:0.5 });
-const axisTick = new THREE.LineBasicMaterial({ color:0xffffff, transparent:true, opacity:0.3 });
-const gridFloor = new THREE.LineBasicMaterial({ color:0xffffff, transparent:true, opacity:0.04 });
+/* ═══════ AXIS MATERIALS — light gray, subtle ═══════ */
+const axisLine = new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.25 });
+const axisTick = new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.18 });
+const gridLine = new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.04 });
 
 /* ═══════ X AXIS — Price ═══════ */
-addLine([new THREE.Vector3(-SW/2, 0, -0.2), new THREE.Vector3(SW/2, 0, -0.2)], axisMain);
-const xTitle = mkLabel('PRICE (USDT)', 9, 'rgba(255,255,255,0.4)', true);
-xTitle.position.set(0, -0.1, -1.0);
+addLine([new THREE.Vector3(-SW / 2, 0, -0.15), new THREE.Vector3(SW / 2, 0, -0.15)], axisLine);
+const xTitle = mkLabel('Price (USDT)', 8, 'rgba(148,163,184,0.35)', false);
+xTitle.position.set(0, -0.08, -0.7);
 scene.add(xTitle);
 
 D.price_labels.forEach(pl => {
   const x = xWorld(pl.idx);
-  addLine([new THREE.Vector3(x, 0, -0.2), new THREE.Vector3(x, -0.1, -0.2)], axisTick);
-  // Floor grid line along Z
-  addLine([new THREE.Vector3(x, 0.005, -0.2), new THREE.Vector3(x, 0.005, TD + 0.2)], gridFloor);
-  const lb = mkLabel(pl.val.toLocaleString(), 8, 'rgba(255,255,255,0.3)', false);
-  lb.position.set(x, -0.25, -0.2);
+  addLine([new THREE.Vector3(x, 0, -0.15), new THREE.Vector3(x, -0.06, -0.15)], axisTick);
+  addLine([new THREE.Vector3(x, 0.003, -0.15), new THREE.Vector3(x, 0.003, TD + 0.1)], gridLine);
+  const lb = mkLabel(pl.val.toLocaleString(), 7, 'rgba(148,163,184,0.28)', false);
+  lb.position.set(x, -0.18, -0.15);
   scene.add(lb);
 });
 
-/* ═══════ Z AXIS — Volume (vertical) ═══════ */
-const yH = HY * 1.1;
-addLine([new THREE.Vector3(-SW/2 - 0.2, 0, -0.2), new THREE.Vector3(-SW/2 - 0.2, yH, -0.2)], axisMain);
-const zTitle = mkLabel('VOLUME', 9, 'rgba(255,255,255,0.4)', true);
-zTitle.position.set(-SW/2 - 0.6, yH * 0.5, -0.2);
-scene.add(zTitle);
+/* ═══════ Y AXIS — Volume ═══════ */
+const yH = HY * 1.05;
+addLine([new THREE.Vector3(-SW / 2 - 0.15, 0, -0.15), new THREE.Vector3(-SW / 2 - 0.15, yH, -0.15)], axisLine);
+const yTitle = mkLabel('Volume', 8, 'rgba(148,163,184,0.35)', false);
+yTitle.position.set(-SW / 2 - 0.5, yH * 0.5, -0.15);
+scene.add(yTitle);
 
 for (let i = 0; i <= 4; i++) {
-  const y = (i/4) * yH;
-  addLine([new THREE.Vector3(-SW/2 - 0.2, y, -0.2), new THREE.Vector3(-SW/2 - 0.35, y, -0.2)], axisTick);
-  // Horizontal grid across back wall
-  addLine([new THREE.Vector3(-SW/2, y, -0.2), new THREE.Vector3(SW/2, y, -0.2)], gridFloor);
-  const lb = mkLabel(Math.round(i * 25) + '%', 7, 'rgba(255,255,255,0.25)', false);
-  lb.position.set(-SW/2 - 0.6, y, -0.2);
+  const y = (i / 4) * yH;
+  addLine([new THREE.Vector3(-SW / 2 - 0.15, y, -0.15), new THREE.Vector3(-SW / 2 - 0.25, y, -0.15)], axisTick);
+  addLine([new THREE.Vector3(-SW / 2, y, -0.15), new THREE.Vector3(SW / 2, y, -0.15)], gridLine);
+  const lb = mkLabel(Math.round(i * 25) + '%', 7, 'rgba(148,163,184,0.22)', false);
+  lb.position.set(-SW / 2 - 0.5, y, -0.15);
   scene.add(lb);
 }
 
-/* ═══════ Y AXIS — Exchange (depth) ═══════ */
-addLine([new THREE.Vector3(-SW/2 - 0.2, 0, -0.2), new THREE.Vector3(-SW/2 - 0.2, 0, TD + 0.3)], axisMain);
-const yTitle = mkLabel('EXCHANGE', 9, 'rgba(255,255,255,0.4)', true);
-yTitle.position.set(-SW/2 - 0.6, -0.1, TD * 0.5);
-scene.add(yTitle);
+/* ═══════ Z AXIS — Exchange ═══════ */
+addLine([new THREE.Vector3(-SW / 2 - 0.15, 0, -0.15), new THREE.Vector3(-SW / 2 - 0.15, 0, TD + 0.15)], axisLine);
 
 /* ═══════ PER-EXCHANGE SURFACES ═══════ */
 const meshes = [];
@@ -182,7 +176,6 @@ EX.forEach((ex, ei) => {
   const prof = PROF[ex];
   const zOff = ei * (SD + GAP);
 
-  /* ── Flat-shaded grid surface ── */
   const geo = new THREE.PlaneGeometry(SW, SD, NB - 1, SROWS - 1);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -193,9 +186,7 @@ EX.forEach((ex, ei) => {
     const r = Math.floor(i / NB);
     const h = prof[c];
     const rT = r / (SROWS - 1);
-    // Flat-top taper: full height in center 60%, linear fall at edges
-    const edgeDist = Math.min(rT, 1.0 - rT) * 2.0;
-    const fade = Math.min(edgeDist / 0.4, 1.0);
+    const fade = Math.sin(rT * Math.PI);
     const fH = h * fade;
 
     pos.setY(i, fH * HY);
@@ -212,9 +203,9 @@ EX.forEach((ex, ei) => {
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.55,
-    metalness: 0.0,
-    flatShading: true,
+    roughness: 0.5,
+    metalness: 0.02,
+    flatShading: false,
     side: THREE.DoubleSide,
   });
   const mesh = new THREE.Mesh(geo, mat);
@@ -222,66 +213,65 @@ EX.forEach((ex, ei) => {
   scene.add(mesh);
   meshes.push(mesh);
 
-  /* ── Wireframe grid overlay ── */
-  const wfGeo = geo.clone();
-  const wfMat = new THREE.MeshBasicMaterial({
-    wireframe: true,
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.04,
-  });
-  scene.add(new THREE.Mesh(wfGeo, wfMat));
-
   /* ── Exchange label ── */
-  const exLbl = mkLabel(ex.toUpperCase(), 10, 'rgba(255,255,255,0.45)', true);
-  exLbl.position.set(-SW/2 - 0.5, 0.06, zOff + SD / 2);
+  const exLbl = mkLabel(ex, 9, 'rgba(148,163,184,0.4)', true);
+  exLbl.position.set(-SW / 2 - 0.4, 0.04, zOff + SD / 2);
   scene.add(exLbl);
   addLine([
-    new THREE.Vector3(-SW/2 - 0.2, 0, zOff + SD/2),
-    new THREE.Vector3(-SW/2 - 0.32, 0, zOff + SD/2),
+    new THREE.Vector3(-SW / 2 - 0.15, 0, zOff + SD / 2),
+    new THREE.Vector3(-SW / 2 - 0.25, 0, zOff + SD / 2),
   ], axisTick);
 });
 
-/* ═══════ VERTICAL DROP LINES from top peaks ═══════ */
-const dropMat = new THREE.LineBasicMaterial({ color: 0xf0d040, transparent: true, opacity: 0.35 });
-const dropMatSub = new THREE.LineBasicMaterial({ color: 0xf0d040, transparent: true, opacity: 0.1 });
+/* ═══════ PEAK LABELS — top 3 only ═══════ */
+const dropMat = new THREE.LineBasicMaterial({ color: 0xF6E05E, transparent: true, opacity: 0.18 });
 
 EX.forEach((ex, ei) => {
   const zOff = ei * (SD + GAP);
   const zMid = zOff + SD / 2;
 
   (WALLS[ex] || []).forEach(w => {
+    if (!w.show_label) return;
     const x = xWorld(w.idx);
     const y = w.height * HY;
 
     // Vertical drop line
-    addLine([new THREE.Vector3(x, y, zMid), new THREE.Vector3(x, 0, zMid)], w.is_top ? dropMat : dropMatSub);
+    addLine([new THREE.Vector3(x, y, zMid), new THREE.Vector3(x, 0, zMid)], dropMat);
 
     // Small floor tick
-    if (w.is_top) {
-      addLine([new THREE.Vector3(x - 0.12, 0.005, zMid), new THREE.Vector3(x + 0.12, 0.005, zMid)], dropMat);
-    }
+    addLine([new THREE.Vector3(x - 0.1, 0.003, zMid), new THREE.Vector3(x + 0.1, 0.003, zMid)], dropMat);
+
+    // Price label
+    const lb = mkLabel('$' + w.price.toLocaleString(), 8, 'rgba(246,224,94,0.55)', true);
+    lb.position.set(x, y + 0.18, zMid);
+    scene.add(lb);
   });
 });
 
-/* ═══════ FLOOR GRID ═══════ */
-// Cross-Z grid lines at price tick positions (already added above)
-// Cross-X grid lines at exchange positions
-EX.forEach((ex, ei) => {
-  const zOff = ei * (SD + GAP) + SD / 2;
-  addLine([new THREE.Vector3(-SW/2, 0.005, zOff), new THREE.Vector3(SW/2, 0.005, zOff)], gridFloor);
+/* ═══════ FLOOR ═══════ */
+const floorGeo = new THREE.PlaneGeometry(SW * 1.2, TD * 1.4);
+floorGeo.rotateX(-Math.PI / 2);
+const floorMat = new THREE.MeshBasicMaterial({
+  color: BG, transparent: true, opacity: 0.15,
 });
+const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+floorMesh.position.set(0, -0.01, TD * 0.42);
+scene.add(floorMesh);
 
-/* ═══════ LIGHTING — clean, even, no drama ═══════ */
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+/* ═══════ LIGHTING — neutral, even ═══════ */
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 
-const keyL = new THREE.DirectionalLight(0xffffff, 1.2);
-keyL.position.set(8, 16, 8);
+const keyL = new THREE.DirectionalLight(0xffffff, 0.9);
+keyL.position.set(6, 14, 8);
 scene.add(keyL);
 
-const fillL = new THREE.DirectionalLight(0xc0d0e0, 0.5);
-fillL.position.set(-8, 10, -4);
+const fillL = new THREE.DirectionalLight(0xe2e8f0, 0.45);
+fillL.position.set(-6, 8, -4);
 scene.add(fillL);
+
+const backL = new THREE.DirectionalLight(0xe2e8f0, 0.2);
+backL.position.set(0, 4, -10);
+scene.add(backL);
 
 /* ═══════ TOOLTIP ═══════ */
 const ray = new THREE.Raycaster();
@@ -299,7 +289,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     const ex = hit.object.userData.exchange;
     const pt = hit.point;
 
-    const priceT = (pt.x + SW/2) / SW;
+    const priceT = (pt.x + SW / 2) / SW;
     const price = D.price_range[0] + priceT * (D.price_range[1] - D.price_range[0]);
     const binIdx = Math.round(priceT * NB);
     const volPct = Math.max(0, (pt.y / HY) * 100);
@@ -317,7 +307,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     tip.style.top = (e.clientY - 10) + 'px';
     tip.innerHTML =
       `<div class="t-label">Exchange</div><div class="t-val">${ex}</div>`
-      + `<div class="t-row"><div class="t-label">Price</div><div class="t-val">${price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} USDT</div></div>`
+      + `<div class="t-row"><div class="t-label">Price</div><div class="t-val">${price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USDT</div></div>`
       + `<div class="t-row"><div class="t-label">Volume</div><div class="t-val">${volPct.toFixed(1)}%</div></div>`
       + wallNote;
   } else {
@@ -327,7 +317,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
 
 renderer.domElement.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 
-/* ═══════ RENDER LOOP ═══════ */
+/* ═══════ RENDER ═══════ */
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
@@ -336,7 +326,6 @@ function animate() {
 }
 animate();
 
-/* ═══════ RESIZE ═══════ */
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();

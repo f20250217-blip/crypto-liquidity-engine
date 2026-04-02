@@ -17,12 +17,12 @@ from scipy.signal import find_peaks
 # Data preparation
 # ---------------------------------------------------------------------------
 
-def _build_exchange_profiles(data: dict, n_bins: int = 120) -> dict:
+def _build_exchange_profiles(data: dict, n_bins: int = 200) -> dict:
     """
-    Build per-exchange depth profiles with aggressive noise removal.
+    Build per-exchange depth profiles.
 
-    Pipeline: average → log-compress → denoise → resample → hard threshold →
-              keep only dominant structures.
+    Pipeline: average → log-compress → denoise → resample → smooth →
+              threshold → normalize. Keeps 6-10 meaningful peaks.
     """
     price_grids = data["price_grids"]
     exchanges = data["exchanges"]
@@ -43,9 +43,7 @@ def _build_exchange_profiles(data: dict, n_bins: int = 120) -> dict:
         x_orig = np.linspace(0, 1, len(raw))
         x_new = np.linspace(0, 1, n_bins)
         resampled = np.interp(x_new, x_orig, raw)
-
-        # Light smooth — preserve grid structure
-        resampled = gaussian_filter(resampled, sigma=1.2)
+        resampled = gaussian_filter(resampled, sigma=2.0)
 
         raw_profiles[ex] = resampled.copy()
         global_max = max(global_max, resampled.max())
@@ -55,12 +53,12 @@ def _build_exchange_profiles(data: dict, n_bins: int = 120) -> dict:
         if global_max > 0:
             p = p / global_max
 
-        # Aggressive threshold — kill bottom 75%
-        p75 = np.percentile(p, 75)
-        p = np.clip((p - p75) / (1.0 - p75 + 1e-9), 0, 1)
+        # Moderate threshold — keep top ~35% of signal for 6-10 peaks
+        p65 = np.percentile(p, 65)
+        p = np.clip((p - p65) / (1.0 - p65 + 1e-9), 0, 1)
 
-        # Minimal smooth to keep grid character
-        p = gaussian_filter(p, sigma=0.8)
+        p = np.power(p, 0.55)
+        p = gaussian_filter(p, sigma=1.5)
 
         pmax = p.max()
         if pmax > 0:
@@ -68,32 +66,33 @@ def _build_exchange_profiles(data: dict, n_bins: int = 120) -> dict:
 
         profiles[ex] = p
 
-    # ── Detect top peaks only ──
+    # ── Detect peaks ──
     walls = {}
     all_walls = []
     for ex in exchanges:
         p = profiles[ex]
-        peak_idxs, _ = find_peaks(p, height=0.4, distance=n_bins // 10, prominence=0.15)
+        peak_idxs, _ = find_peaks(p, height=0.3, distance=n_bins // 12, prominence=0.1)
         wall_list = []
         for idx in peak_idxs:
             wall_list.append({
                 "idx": int(idx),
                 "height": round(float(p[idx]), 3),
                 "price": round(float(price_ticks[idx]), 2),
+                "exchange": ex,
             })
         wall_list.sort(key=lambda w: w["height"], reverse=True)
-        walls[ex] = wall_list[:4]
-        all_walls.extend(wall_list[:4])
+        walls[ex] = wall_list[:5]
+        all_walls.extend(wall_list[:5])
 
-    # Keep only global top 5 for drop lines
+    # Global top 3 for labels
     all_walls.sort(key=lambda w: w["height"], reverse=True)
     top_keys = set()
-    for w in all_walls[:5]:
-        top_keys.add(w["price"])
+    for w in all_walls[:3]:
+        top_keys.add((w["exchange"], w["idx"]))
 
     for ex in exchanges:
         for w in walls[ex]:
-            w["is_top"] = w["price"] in top_keys
+            w["show_label"] = (ex, w["idx"]) in top_keys
 
     # ── Imbalance ──
     avg_imbalances = {}
@@ -101,8 +100,8 @@ def _build_exchange_profiles(data: dict, n_bins: int = 120) -> dict:
         imb = imbalance_series.get(ex, [0])
         avg_imbalances[ex] = round(float(np.mean(imb)), 4)
 
-    # ── Price labels — 8 ticks ──
-    n_labels = 8
+    # ── Price labels — 6 ticks ──
+    n_labels = 6
     step = max(1, n_bins // n_labels)
     price_labels = [
         {"idx": int(i), "val": round(float(price_ticks[i]), 2)}
@@ -162,28 +161,27 @@ def _build_3d_html(payload_json: str) -> str:
 <title>3D Liquidity Engine — BTC/USDT</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#0F1115; overflow:hidden; font-family:'Consolas','SF Mono','Menlo',monospace; }}
+  body {{ background:#0F172A; overflow:hidden; font-family:'Consolas','SF Mono','Menlo',monospace; }}
   canvas {{ display:block; }}
 
   #tooltip {{
     position:fixed; pointer-events:none; display:none;
-    background:rgba(15,17,21,0.95); border:1px solid rgba(80,200,230,0.3);
-    color:#c0d8e8; padding:10px 14px; border-radius:3px;
+    background:rgba(15,23,42,0.94); border:1px solid rgba(79,209,197,0.25);
+    color:#c0d8e8; padding:10px 14px; border-radius:4px;
     font-size:11px; line-height:1.6; z-index:100;
-    min-width:160px; font-family:'Consolas','SF Mono',monospace;
+    min-width:155px; font-family:'Consolas','SF Mono',monospace;
   }}
-  #tooltip .t-label {{ color:rgba(80,200,230,0.5); font-size:9px; text-transform:uppercase; letter-spacing:0.8px; }}
-  #tooltip .t-val {{ color:#e0f4ff; font-size:12px; font-weight:600; }}
+  #tooltip .t-label {{ color:rgba(79,209,197,0.5); font-size:9px; text-transform:uppercase; letter-spacing:0.7px; }}
+  #tooltip .t-val {{ color:#e2e8f0; font-size:12px; font-weight:600; }}
   #tooltip .t-row {{ margin-top:3px; }}
-  #tooltip .t-wall {{ color:#f0d040; font-size:9px; margin-top:5px; font-weight:700; }}
+  #tooltip .t-wall {{ color:#F6E05E; font-size:9px; margin-top:5px; font-weight:700; }}
 
   #info {{
     position:fixed; top:14px; left:16px; z-index:90;
-    font-size:10px; color:rgba(180,200,220,0.35);
+    font-size:10px; color:rgba(148,163,184,0.4);
     font-family:'Consolas','SF Mono',monospace;
-    letter-spacing:0.3px;
   }}
-  #info span {{ color:rgba(80,200,230,0.5); }}
+  #info span {{ color:rgba(79,209,197,0.45); }}
 </style>
 </head>
 <body>
@@ -210,38 +208,38 @@ const PROF = D.profiles;
 const WALLS = D.walls;
 
 /* ═══════ LAYOUT ═══════ */
-const SW = 16;
-const SD = 3.5;
-const GAP = 0.6;
-const HY = 3.2;
-const BG = 0x0F1115;
+const SW = 15;
+const SD = 3.0;
+const GAP = 1.0;
+const HY = 2.8;
+const BG = 0x0F172A;
 const TD = EX.length * SD + (EX.length - 1) * GAP;
-const SROWS = 20;
+const SROWS = 22;
 
-/* ═══════ HEATMAP: dark-blue → blue → cyan → yellow ═══════ */
+/* ═══════ COLOR: #1E2A38 → #2F6FA3 → #4FD1C5 → #F6E05E ═══════ */
 const CS = [
-  [0.00, 0.04, 0.06, 0.18],
-  [0.20, 0.06, 0.12, 0.35],
-  [0.40, 0.08, 0.25, 0.55],
-  [0.55, 0.10, 0.45, 0.70],
-  [0.70, 0.15, 0.65, 0.80],
-  [0.82, 0.30, 0.82, 0.85],
-  [0.92, 0.70, 0.92, 0.40],
-  [1.00, 0.95, 0.88, 0.15],
+  [0.00, 0.118, 0.165, 0.220],
+  [0.33, 0.184, 0.435, 0.640],
+  [0.66, 0.310, 0.820, 0.773],
+  [1.00, 0.965, 0.878, 0.369],
 ];
 
 function colorAt(t) {{
   t = Math.max(0, Math.min(1, t));
-  let lo = CS[0], hi = CS[CS.length-1];
-  for (let i = 0; i < CS.length-1; i++) {{
-    if (t >= CS[i][0] && t <= CS[i+1][0]) {{ lo=CS[i]; hi=CS[i+1]; break; }}
+  let lo = CS[0], hi = CS[CS.length - 1];
+  for (let i = 0; i < CS.length - 1; i++) {{
+    if (t >= CS[i][0] && t <= CS[i + 1][0]) {{ lo = CS[i]; hi = CS[i + 1]; break; }}
   }}
-  const f = hi[0]>lo[0] ? (t-lo[0])/(hi[0]-lo[0]) : 0;
-  return new THREE.Color(lo[1]+(hi[1]-lo[1])*f, lo[2]+(hi[2]-lo[2])*f, lo[3]+(hi[3]-lo[3])*f);
+  const f = hi[0] > lo[0] ? (t - lo[0]) / (hi[0] - lo[0]) : 0;
+  return new THREE.Color(
+    lo[1] + (hi[1] - lo[1]) * f,
+    lo[2] + (hi[2] - lo[2]) * f,
+    lo[3] + (hi[3] - lo[3]) * f
+  );
 }}
 
 /* ═══════ RENDERER ═══════ */
-const renderer = new THREE.WebGLRenderer({{ antialias:true }});
+const renderer = new THREE.WebGLRenderer({{ antialias: true }});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -258,79 +256,74 @@ document.body.appendChild(labelR.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 
-/* ═══════ CAMERA — analytical angle, low distortion ═══════ */
-const camera = new THREE.PerspectiveCamera(35, window.innerWidth/window.innerHeight, 0.1, 500);
-camera.position.set(14, 10, TD + 12);
+/* ═══════ CAMERA — balanced, ~80% frame fill ═══════ */
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 400);
+camera.position.set(10, 7, TD + 8);
 
 /* ═══════ CONTROLS ═══════ */
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.minDistance = 8;
-controls.maxDistance = 50;
-controls.maxPolarAngle = Math.PI * 0.42;
-controls.target.set(0, 0.8, TD * 0.42);
+controls.dampingFactor = 0.06;
+controls.minDistance = 6;
+controls.maxDistance = 40;
+controls.maxPolarAngle = Math.PI * 0.44;
+controls.target.set(0, 0.5, TD * 0.42);
 controls.autoRotate = true;
-controls.autoRotateSpeed = 0.12;
+controls.autoRotateSpeed = 0.15;
 
 /* ═══════ HELPERS ═══════ */
 function mkLabel(text, size, color, bold) {{
   const d = document.createElement('div');
   d.textContent = text;
-  d.style.cssText = `color:${{color}};font-family:'Consolas','SF Mono',monospace;font-size:${{size}}px;${{bold?'font-weight:700;':''}}white-space:nowrap;pointer-events:none;`;
+  d.style.cssText = `color:${{color}};font-family:'Consolas','SF Mono',monospace;font-size:${{size}}px;${{bold ? 'font-weight:600;' : ''}}white-space:nowrap;pointer-events:none;`;
   return new CSS2DObject(d);
 }}
 
-function xWorld(binIdx) {{ return -SW/2 + (binIdx/NB) * SW; }}
+function xWorld(binIdx) {{ return -SW / 2 + (binIdx / NB) * SW; }}
 
 function addLine(pts, mat) {{
   const g = new THREE.BufferGeometry().setFromPoints(pts);
   scene.add(new THREE.Line(g, mat));
 }}
 
-/* ═══════ AXIS MATERIALS ═══════ */
-const axisMain = new THREE.LineBasicMaterial({{ color:0xffffff, transparent:true, opacity:0.5 }});
-const axisTick = new THREE.LineBasicMaterial({{ color:0xffffff, transparent:true, opacity:0.3 }});
-const gridFloor = new THREE.LineBasicMaterial({{ color:0xffffff, transparent:true, opacity:0.04 }});
+/* ═══════ AXIS MATERIALS — light gray, subtle ═══════ */
+const axisLine = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.25 }});
+const axisTick = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.18 }});
+const gridLine = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.04 }});
 
 /* ═══════ X AXIS — Price ═══════ */
-addLine([new THREE.Vector3(-SW/2, 0, -0.2), new THREE.Vector3(SW/2, 0, -0.2)], axisMain);
-const xTitle = mkLabel('PRICE (USDT)', 9, 'rgba(255,255,255,0.4)', true);
-xTitle.position.set(0, -0.1, -1.0);
+addLine([new THREE.Vector3(-SW / 2, 0, -0.15), new THREE.Vector3(SW / 2, 0, -0.15)], axisLine);
+const xTitle = mkLabel('Price (USDT)', 8, 'rgba(148,163,184,0.35)', false);
+xTitle.position.set(0, -0.08, -0.7);
 scene.add(xTitle);
 
 D.price_labels.forEach(pl => {{
   const x = xWorld(pl.idx);
-  addLine([new THREE.Vector3(x, 0, -0.2), new THREE.Vector3(x, -0.1, -0.2)], axisTick);
-  // Floor grid line along Z
-  addLine([new THREE.Vector3(x, 0.005, -0.2), new THREE.Vector3(x, 0.005, TD + 0.2)], gridFloor);
-  const lb = mkLabel(pl.val.toLocaleString(), 8, 'rgba(255,255,255,0.3)', false);
-  lb.position.set(x, -0.25, -0.2);
+  addLine([new THREE.Vector3(x, 0, -0.15), new THREE.Vector3(x, -0.06, -0.15)], axisTick);
+  addLine([new THREE.Vector3(x, 0.003, -0.15), new THREE.Vector3(x, 0.003, TD + 0.1)], gridLine);
+  const lb = mkLabel(pl.val.toLocaleString(), 7, 'rgba(148,163,184,0.28)', false);
+  lb.position.set(x, -0.18, -0.15);
   scene.add(lb);
 }});
 
-/* ═══════ Z AXIS — Volume (vertical) ═══════ */
-const yH = HY * 1.1;
-addLine([new THREE.Vector3(-SW/2 - 0.2, 0, -0.2), new THREE.Vector3(-SW/2 - 0.2, yH, -0.2)], axisMain);
-const zTitle = mkLabel('VOLUME', 9, 'rgba(255,255,255,0.4)', true);
-zTitle.position.set(-SW/2 - 0.6, yH * 0.5, -0.2);
-scene.add(zTitle);
+/* ═══════ Y AXIS — Volume ═══════ */
+const yH = HY * 1.05;
+addLine([new THREE.Vector3(-SW / 2 - 0.15, 0, -0.15), new THREE.Vector3(-SW / 2 - 0.15, yH, -0.15)], axisLine);
+const yTitle = mkLabel('Volume', 8, 'rgba(148,163,184,0.35)', false);
+yTitle.position.set(-SW / 2 - 0.5, yH * 0.5, -0.15);
+scene.add(yTitle);
 
 for (let i = 0; i <= 4; i++) {{
-  const y = (i/4) * yH;
-  addLine([new THREE.Vector3(-SW/2 - 0.2, y, -0.2), new THREE.Vector3(-SW/2 - 0.35, y, -0.2)], axisTick);
-  // Horizontal grid across back wall
-  addLine([new THREE.Vector3(-SW/2, y, -0.2), new THREE.Vector3(SW/2, y, -0.2)], gridFloor);
-  const lb = mkLabel(Math.round(i * 25) + '%', 7, 'rgba(255,255,255,0.25)', false);
-  lb.position.set(-SW/2 - 0.6, y, -0.2);
+  const y = (i / 4) * yH;
+  addLine([new THREE.Vector3(-SW / 2 - 0.15, y, -0.15), new THREE.Vector3(-SW / 2 - 0.25, y, -0.15)], axisTick);
+  addLine([new THREE.Vector3(-SW / 2, y, -0.15), new THREE.Vector3(SW / 2, y, -0.15)], gridLine);
+  const lb = mkLabel(Math.round(i * 25) + '%', 7, 'rgba(148,163,184,0.22)', false);
+  lb.position.set(-SW / 2 - 0.5, y, -0.15);
   scene.add(lb);
 }}
 
-/* ═══════ Y AXIS — Exchange (depth) ═══════ */
-addLine([new THREE.Vector3(-SW/2 - 0.2, 0, -0.2), new THREE.Vector3(-SW/2 - 0.2, 0, TD + 0.3)], axisMain);
-const yTitle = mkLabel('EXCHANGE', 9, 'rgba(255,255,255,0.4)', true);
-yTitle.position.set(-SW/2 - 0.6, -0.1, TD * 0.5);
-scene.add(yTitle);
+/* ═══════ Z AXIS — Exchange ═══════ */
+addLine([new THREE.Vector3(-SW / 2 - 0.15, 0, -0.15), new THREE.Vector3(-SW / 2 - 0.15, 0, TD + 0.15)], axisLine);
 
 /* ═══════ PER-EXCHANGE SURFACES ═══════ */
 const meshes = [];
@@ -339,7 +332,6 @@ EX.forEach((ex, ei) => {{
   const prof = PROF[ex];
   const zOff = ei * (SD + GAP);
 
-  /* ── Flat-shaded grid surface ── */
   const geo = new THREE.PlaneGeometry(SW, SD, NB - 1, SROWS - 1);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
@@ -350,9 +342,7 @@ EX.forEach((ex, ei) => {{
     const r = Math.floor(i / NB);
     const h = prof[c];
     const rT = r / (SROWS - 1);
-    // Flat-top taper: full height in center 60%, linear fall at edges
-    const edgeDist = Math.min(rT, 1.0 - rT) * 2.0;
-    const fade = Math.min(edgeDist / 0.4, 1.0);
+    const fade = Math.sin(rT * Math.PI);
     const fH = h * fade;
 
     pos.setY(i, fH * HY);
@@ -369,9 +359,9 @@ EX.forEach((ex, ei) => {{
 
   const mat = new THREE.MeshStandardMaterial({{
     vertexColors: true,
-    roughness: 0.55,
-    metalness: 0.0,
-    flatShading: true,
+    roughness: 0.5,
+    metalness: 0.02,
+    flatShading: false,
     side: THREE.DoubleSide,
   }});
   const mesh = new THREE.Mesh(geo, mat);
@@ -379,66 +369,65 @@ EX.forEach((ex, ei) => {{
   scene.add(mesh);
   meshes.push(mesh);
 
-  /* ── Wireframe grid overlay ── */
-  const wfGeo = geo.clone();
-  const wfMat = new THREE.MeshBasicMaterial({{
-    wireframe: true,
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.04,
-  }});
-  scene.add(new THREE.Mesh(wfGeo, wfMat));
-
   /* ── Exchange label ── */
-  const exLbl = mkLabel(ex.toUpperCase(), 10, 'rgba(255,255,255,0.45)', true);
-  exLbl.position.set(-SW/2 - 0.5, 0.06, zOff + SD / 2);
+  const exLbl = mkLabel(ex, 9, 'rgba(148,163,184,0.4)', true);
+  exLbl.position.set(-SW / 2 - 0.4, 0.04, zOff + SD / 2);
   scene.add(exLbl);
   addLine([
-    new THREE.Vector3(-SW/2 - 0.2, 0, zOff + SD/2),
-    new THREE.Vector3(-SW/2 - 0.32, 0, zOff + SD/2),
+    new THREE.Vector3(-SW / 2 - 0.15, 0, zOff + SD / 2),
+    new THREE.Vector3(-SW / 2 - 0.25, 0, zOff + SD / 2),
   ], axisTick);
 }});
 
-/* ═══════ VERTICAL DROP LINES from top peaks ═══════ */
-const dropMat = new THREE.LineBasicMaterial({{ color: 0xf0d040, transparent: true, opacity: 0.35 }});
-const dropMatSub = new THREE.LineBasicMaterial({{ color: 0xf0d040, transparent: true, opacity: 0.1 }});
+/* ═══════ PEAK LABELS — top 3 only ═══════ */
+const dropMat = new THREE.LineBasicMaterial({{ color: 0xF6E05E, transparent: true, opacity: 0.18 }});
 
 EX.forEach((ex, ei) => {{
   const zOff = ei * (SD + GAP);
   const zMid = zOff + SD / 2;
 
   (WALLS[ex] || []).forEach(w => {{
+    if (!w.show_label) return;
     const x = xWorld(w.idx);
     const y = w.height * HY;
 
     // Vertical drop line
-    addLine([new THREE.Vector3(x, y, zMid), new THREE.Vector3(x, 0, zMid)], w.is_top ? dropMat : dropMatSub);
+    addLine([new THREE.Vector3(x, y, zMid), new THREE.Vector3(x, 0, zMid)], dropMat);
 
     // Small floor tick
-    if (w.is_top) {{
-      addLine([new THREE.Vector3(x - 0.12, 0.005, zMid), new THREE.Vector3(x + 0.12, 0.005, zMid)], dropMat);
-    }}
+    addLine([new THREE.Vector3(x - 0.1, 0.003, zMid), new THREE.Vector3(x + 0.1, 0.003, zMid)], dropMat);
+
+    // Price label
+    const lb = mkLabel('$' + w.price.toLocaleString(), 8, 'rgba(246,224,94,0.55)', true);
+    lb.position.set(x, y + 0.18, zMid);
+    scene.add(lb);
   }});
 }});
 
-/* ═══════ FLOOR GRID ═══════ */
-// Cross-Z grid lines at price tick positions (already added above)
-// Cross-X grid lines at exchange positions
-EX.forEach((ex, ei) => {{
-  const zOff = ei * (SD + GAP) + SD / 2;
-  addLine([new THREE.Vector3(-SW/2, 0.005, zOff), new THREE.Vector3(SW/2, 0.005, zOff)], gridFloor);
+/* ═══════ FLOOR ═══════ */
+const floorGeo = new THREE.PlaneGeometry(SW * 1.2, TD * 1.4);
+floorGeo.rotateX(-Math.PI / 2);
+const floorMat = new THREE.MeshBasicMaterial({{
+  color: BG, transparent: true, opacity: 0.15,
 }});
+const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+floorMesh.position.set(0, -0.01, TD * 0.42);
+scene.add(floorMesh);
 
-/* ═══════ LIGHTING — clean, even, no drama ═══════ */
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+/* ═══════ LIGHTING — neutral, even ═══════ */
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 
-const keyL = new THREE.DirectionalLight(0xffffff, 1.2);
-keyL.position.set(8, 16, 8);
+const keyL = new THREE.DirectionalLight(0xffffff, 0.9);
+keyL.position.set(6, 14, 8);
 scene.add(keyL);
 
-const fillL = new THREE.DirectionalLight(0xc0d0e0, 0.5);
-fillL.position.set(-8, 10, -4);
+const fillL = new THREE.DirectionalLight(0xe2e8f0, 0.45);
+fillL.position.set(-6, 8, -4);
 scene.add(fillL);
+
+const backL = new THREE.DirectionalLight(0xe2e8f0, 0.2);
+backL.position.set(0, 4, -10);
+scene.add(backL);
 
 /* ═══════ TOOLTIP ═══════ */
 const ray = new THREE.Raycaster();
@@ -456,7 +445,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {{
     const ex = hit.object.userData.exchange;
     const pt = hit.point;
 
-    const priceT = (pt.x + SW/2) / SW;
+    const priceT = (pt.x + SW / 2) / SW;
     const price = D.price_range[0] + priceT * (D.price_range[1] - D.price_range[0]);
     const binIdx = Math.round(priceT * NB);
     const volPct = Math.max(0, (pt.y / HY) * 100);
@@ -474,7 +463,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {{
     tip.style.top = (e.clientY - 10) + 'px';
     tip.innerHTML =
       `<div class="t-label">Exchange</div><div class="t-val">${{ex}}</div>`
-      + `<div class="t-row"><div class="t-label">Price</div><div class="t-val">${{price.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}})}} USDT</div></div>`
+      + `<div class="t-row"><div class="t-label">Price</div><div class="t-val">${{price.toLocaleString(undefined, {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}} USDT</div></div>`
       + `<div class="t-row"><div class="t-label">Volume</div><div class="t-val">${{volPct.toFixed(1)}}%</div></div>`
       + wallNote;
   }} else {{
@@ -484,7 +473,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {{
 
 renderer.domElement.addEventListener('mouseleave', () => {{ tip.style.display = 'none'; }});
 
-/* ═══════ RENDER LOOP ═══════ */
+/* ═══════ RENDER ═══════ */
 function animate() {{
   requestAnimationFrame(animate);
   controls.update();
@@ -493,7 +482,6 @@ function animate() {{
 }}
 animate();
 
-/* ═══════ RESIZE ═══════ */
 window.addEventListener('resize', () => {{
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -516,7 +504,7 @@ def _build_dashboard_html(payload_json: str, spark_json: str, data: dict) -> str
         imb = imbalance.get(ex, [0])
         last_imb = imb[-1] if imb else 0
         avg_imb = float(np.mean(imb)) if imb else 0
-        imb_color = "#40b878" if last_imb > 0 else "#e05858"
+        imb_color = "#4FD1C5" if last_imb > 0 else "#F87171"
         stat_rows += f"""
         <tr>
           <td style="font-weight:600">{ex}</td>
@@ -531,26 +519,26 @@ def _build_dashboard_html(payload_json: str, spark_json: str, data: dict) -> str
 <title>Liquidity Dashboard — BTC/USDT</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#0a0c10; color:#a0b0c0; font-family:'Consolas','SF Mono','Menlo',monospace; }}
+  body {{ background:#0F172A; color:#94a3b8; font-family:'Consolas','SF Mono','Menlo',monospace; }}
   .header {{
-    padding:14px 20px; border-bottom:1px solid rgba(255,255,255,0.06);
+    padding:14px 20px; border-bottom:1px solid rgba(148,163,184,0.08);
     display:flex; justify-content:space-between; align-items:center;
   }}
-  .header h1 {{ color:#d0dce8; font-size:13px; font-weight:600; letter-spacing:0.5px; }}
-  .header .meta {{ font-size:10px; color:rgba(255,255,255,0.25); }}
+  .header h1 {{ color:#e2e8f0; font-size:13px; font-weight:600; letter-spacing:0.4px; }}
+  .header .meta {{ font-size:10px; color:rgba(148,163,184,0.35); }}
   .panels {{ display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr auto; height:calc(100vh - 48px); }}
-  .panel {{ border:1px solid rgba(255,255,255,0.04); position:relative; overflow:hidden; }}
+  .panel {{ border:1px solid rgba(148,163,184,0.06); position:relative; overflow:hidden; }}
   .panel-title {{
     position:absolute; top:8px; left:12px; font-size:9px;
-    color:rgba(255,255,255,0.2); text-transform:uppercase; letter-spacing:1.2px; z-index:10;
+    color:rgba(148,163,184,0.25); text-transform:uppercase; letter-spacing:1px; z-index:10;
   }}
   .panel-3d {{ grid-column:1/-1; min-height:60vh; }}
   .panel-3d iframe {{ width:100%; height:100%; border:none; display:block; }}
   table {{ width:100%; border-collapse:collapse; font-size:11px; }}
-  th {{ text-align:left; color:rgba(255,255,255,0.2); font-weight:400; padding:8px 12px;
+  th {{ text-align:left; color:rgba(148,163,184,0.3); font-weight:400; padding:8px 12px;
        text-transform:uppercase; font-size:8px; letter-spacing:0.8px;
-       border-bottom:1px solid rgba(255,255,255,0.06); }}
-  td {{ padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.03); }}
+       border-bottom:1px solid rgba(148,163,184,0.08); }}
+  td {{ padding:8px 12px; border-bottom:1px solid rgba(148,163,184,0.04); }}
   .spark-panel {{ padding:16px; }}
   .spark-row {{ display:flex; align-items:center; margin-bottom:10px; gap:12px; }}
   .spark-label {{ width:72px; font-size:10px; font-weight:600; }}
@@ -581,7 +569,7 @@ def _build_dashboard_html(payload_json: str, spark_json: str, data: dict) -> str
 </div>
 <script>
 const sparkData = {spark_json};
-const exColors = {{ Binance:'#e0b830', Coinbase:'#3080e0', Kraken:'#7050c0' }};
+const exColors = {{ Binance:'#F6E05E', Coinbase:'#4FD1C5', Kraken:'#2F6FA3' }};
 const ctr = document.getElementById('sparklines');
 
 Object.entries(sparkData).forEach(([ex, vals]) => {{
@@ -589,7 +577,7 @@ Object.entries(sparkData).forEach(([ex, vals]) => {{
   row.className = 'spark-row';
   const lbl = document.createElement('div');
   lbl.className = 'spark-label';
-  lbl.style.color = exColors[ex] || '#a0b0c0';
+  lbl.style.color = exColors[ex] || '#94a3b8';
   lbl.textContent = ex;
   const cvs = document.createElement('canvas');
   cvs.className = 'spark-canvas';
@@ -609,9 +597,8 @@ Object.entries(sparkData).forEach(([ex, vals]) => {{
     const rng = mx - mn || 1;
     const pad = 4;
 
-    // Zero line
     const zy = h - pad - ((0 - mn) / rng) * (h - pad * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.strokeStyle = 'rgba(148,163,184,0.1)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -620,8 +607,7 @@ Object.entries(sparkData).forEach(([ex, vals]) => {{
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Sparkline
-    ctx.strokeStyle = exColors[ex] || '#a0b0c0';
+    ctx.strokeStyle = exColors[ex] || '#94a3b8';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     vals.forEach((v, i) => {{

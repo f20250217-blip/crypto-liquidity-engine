@@ -5,26 +5,26 @@
 <title>Liquidity Dashboard — BTC/USDT</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#0a0c10; color:#a0b0c0; font-family:'Consolas','SF Mono','Menlo',monospace; }
+  body { background:#0F172A; color:#94a3b8; font-family:'Consolas','SF Mono','Menlo',monospace; }
   .header {
-    padding:14px 20px; border-bottom:1px solid rgba(255,255,255,0.06);
+    padding:14px 20px; border-bottom:1px solid rgba(148,163,184,0.08);
     display:flex; justify-content:space-between; align-items:center;
   }
-  .header h1 { color:#d0dce8; font-size:13px; font-weight:600; letter-spacing:0.5px; }
-  .header .meta { font-size:10px; color:rgba(255,255,255,0.25); }
+  .header h1 { color:#e2e8f0; font-size:13px; font-weight:600; letter-spacing:0.4px; }
+  .header .meta { font-size:10px; color:rgba(148,163,184,0.35); }
   .panels { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr auto; height:calc(100vh - 48px); }
-  .panel { border:1px solid rgba(255,255,255,0.04); position:relative; overflow:hidden; }
+  .panel { border:1px solid rgba(148,163,184,0.06); position:relative; overflow:hidden; }
   .panel-title {
     position:absolute; top:8px; left:12px; font-size:9px;
-    color:rgba(255,255,255,0.2); text-transform:uppercase; letter-spacing:1.2px; z-index:10;
+    color:rgba(148,163,184,0.25); text-transform:uppercase; letter-spacing:1px; z-index:10;
   }
   .panel-3d { grid-column:1/-1; min-height:60vh; }
   .panel-3d iframe { width:100%; height:100%; border:none; display:block; }
   table { width:100%; border-collapse:collapse; font-size:11px; }
-  th { text-align:left; color:rgba(255,255,255,0.2); font-weight:400; padding:8px 12px;
+  th { text-align:left; color:rgba(148,163,184,0.3); font-weight:400; padding:8px 12px;
        text-transform:uppercase; font-size:8px; letter-spacing:0.8px;
-       border-bottom:1px solid rgba(255,255,255,0.06); }
-  td { padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.03); }
+       border-bottom:1px solid rgba(148,163,184,0.08); }
+  td { padding:8px 12px; border-bottom:1px solid rgba(148,163,184,0.04); }
   .spark-panel { padding:16px; }
   .spark-row { display:flex; align-items:center; margin-bottom:10px; gap:12px; }
   .spark-label { width:72px; font-size:10px; font-weight:600; }
@@ -34,7 +34,7 @@
 <body>
 <div class="header">
   <h1>Cross-Exchange Liquidity Dashboard — BTC/USDT</h1>
-  <div class="meta">30 snapshots &middot; 65917.4 — 66245.4 USDT</div>
+  <div class="meta">30 snapshots &middot; 65870.51 — 66229.2 USDT</div>
 </div>
 <div class="panels">
   <div class="panel panel-3d">
@@ -48,18 +48,18 @@
       
         <tr>
           <td style="font-weight:600">Binance</td>
-          <td style="color:#40b878">+0.6773</td>
-          <td>-0.1793</td>
+          <td style="color:#4FD1C5">+0.8704</td>
+          <td>+0.0618</td>
         </tr>
         <tr>
           <td style="font-weight:600">Coinbase</td>
-          <td style="color:#40b878">+0.3083</td>
-          <td>+0.2643</td>
+          <td style="color:#4FD1C5">+0.4076</td>
+          <td>+0.2944</td>
         </tr>
         <tr>
           <td style="font-weight:600">Kraken</td>
-          <td style="color:#e05858">+0.0000</td>
-          <td>-0.0024</td>
+          <td style="color:#4FD1C5">+0.1226</td>
+          <td>-0.0109</td>
         </tr>
     </table>
   </div>
@@ -69,8 +69,8 @@
   </div>
 </div>
 <script>
-const sparkData = {"Binance":[0.68,0.5858,-0.7333,-0.7412,-0.5395,-0.8118,-0.7475,-0.0268,-0.6576,0.111,-0.2835,-0.0003,0.2561,0.1882,-0.0684,0.9186,0.4637,-0.5803,-0.8983,-0.9227,-0.6936,-0.9709,0.7969,-0.4608,-0.5582,0.3263,-0.4717,0.3425,-0.559,0.6773],"Coinbase":[0.2369,0.2216,0.2944,0.3406,0.2359,0.3075,0.2939,0.2475,0.3291,0.2887,0.358,0.0645,0.1397,0.126,0.0885,0.0046,0.0865,0.2648,0.3378,0.3872,0.3704,0.2743,0.3124,0.3238,0.2604,0.296,0.3686,0.402,0.3584,0.3083],"Kraken":[0.0,0.0,0.0,0.0,-0.0286,-0.0062,0.0,0.0,0.0,-0.0278,0.026,-0.0773,0.0,0.0,0.0,-0.0748,0.0,0.0,0.0693,0.0,0.0,0.0,-0.0387,0.0075,-0.0515,-0.0201,0.0453,0.1049,0.0,0.0]};
-const exColors = { Binance:'#e0b830', Coinbase:'#3080e0', Kraken:'#7050c0' };
+const sparkData = {"Binance":[-0.2078,0.2886,0.7291,0.8349,0.6647,-0.7387,0.8931,0.853,0.8701,-0.7779,0.4875,0.7628,0.6586,0.5583,-0.4228,-0.5702,-0.7735,-0.2547,0.9699,0.1401,-0.1473,-0.9576,-0.8042,-0.3362,-0.8367,0.1753,-0.7366,0.6066,-0.9435,0.8704],"Coinbase":[0.2808,0.3001,0.2783,0.2221,0.2316,0.4241,0.2659,0.2219,-0.0124,0.3374,0.2093,0.19,0.2499,0.1866,0.1694,0.2348,0.4769,0.0738,0.0236,0.0604,0.4022,0.5051,0.4394,0.4357,0.4228,0.4961,0.4132,0.4748,0.4096,0.4076],"Kraken":[0.0,0.0,0.0381,0.027,-0.1255,-0.0304,0.0,0.0,-0.0675,0.0,-0.1459,0.0,-0.1057,0.0002,-0.016,-0.102,0.0,-0.0584,0.0443,-0.0121,0.0116,0.007,-0.02,0.0,0.0,0.0,0.1057,0.0,0.0,0.1226]};
+const exColors = { Binance:'#F6E05E', Coinbase:'#4FD1C5', Kraken:'#2F6FA3' };
 const ctr = document.getElementById('sparklines');
 
 Object.entries(sparkData).forEach(([ex, vals]) => {
@@ -78,7 +78,7 @@ Object.entries(sparkData).forEach(([ex, vals]) => {
   row.className = 'spark-row';
   const lbl = document.createElement('div');
   lbl.className = 'spark-label';
-  lbl.style.color = exColors[ex] || '#a0b0c0';
+  lbl.style.color = exColors[ex] || '#94a3b8';
   lbl.textContent = ex;
   const cvs = document.createElement('canvas');
   cvs.className = 'spark-canvas';
@@ -98,9 +98,8 @@ Object.entries(sparkData).forEach(([ex, vals]) => {
     const rng = mx - mn || 1;
     const pad = 4;
 
-    // Zero line
     const zy = h - pad - ((0 - mn) / rng) * (h - pad * 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.strokeStyle = 'rgba(148,163,184,0.1)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -109,8 +108,7 @@ Object.entries(sparkData).forEach(([ex, vals]) => {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Sparkline
-    ctx.strokeStyle = exColors[ex] || '#a0b0c0';
+    ctx.strokeStyle = exColors[ex] || '#94a3b8';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     vals.forEach((v, i) => {

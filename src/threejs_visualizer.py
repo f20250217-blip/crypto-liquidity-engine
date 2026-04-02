@@ -6,19 +6,25 @@ Produces a self-contained HTML file — no Plotly, no matplotlib.
 import os
 import json
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, median_filter
 from scipy.interpolate import RegularGridInterpolator
 
 
-def _prepare_grid(data: dict, grid_cols: int = 140, grid_rows: int = 100) -> dict:
+def _prepare_grid(data: dict, grid_cols: int = 120, grid_rows: int = 80) -> dict:
     """
-    Aggregate volume across exchanges and resample onto a high-resolution
-    grid suitable for Three.js PlaneGeometry vertex displacement.
+    Aggregate volume across exchanges, extract dominant liquidity
+    structures, and resample onto a clean grid for Three.js.
 
-    Returns:
-        heights: row-major flattened list of normalised [0,1] values
-        rows: grid rows (depth / time axis)
-        cols: grid columns (price axis)
+    Pipeline:
+      1. Aggregate across exchanges
+      2. Log-compress to tame spikes
+      3. Median filter to kill salt-and-pepper noise
+      4. Resample onto target grid
+      5. Heavy Gaussian smooth for broad ridges
+      6. Suppress bottom 80% (noise floor) with soft threshold
+      7. Power-curve to widen dominant structures
+      8. Final polish smooth
+      9. Normalize to [0, 1]
     """
     matrices = list(data["price_grids"].values())
     agg = np.zeros_like(matrices[0])
@@ -27,8 +33,11 @@ def _prepare_grid(data: dict, grid_cols: int = 140, grid_rows: int = 100) -> dic
 
     n_time, n_price = agg.shape
 
-    # Log-scale to compress dominant spikes
+    # Log-compress to reduce spike dominance
     agg = np.log1p(agg)
+
+    # Median filter: removes isolated spikes while preserving edges
+    agg = median_filter(agg, size=3)
 
     # Resample via bilinear interpolation onto target grid
     t_orig = np.linspace(0, 1, n_time)
@@ -43,13 +52,29 @@ def _prepare_grid(data: dict, grid_cols: int = 140, grid_rows: int = 100) -> dic
     tg, pg = np.meshgrid(t_new, p_new, indexing="ij")
     resampled = interp((tg, pg))
 
-    # Two-pass smooth for cinematic fluid surface
-    resampled = gaussian_filter(resampled, sigma=1.8)
+    # Heavy Gaussian smooth — creates broad ridges instead of spikes
+    resampled = gaussian_filter(resampled, sigma=3.5)
 
-    # Normalise to [0, 1]
+    # Normalize to [0, 1] before thresholding
     vmax = resampled.max()
     if vmax > 0:
-        resampled = resampled / vmax
+        resampled /= vmax
+
+    # Soft threshold: suppress bottom 80% (noise floor)
+    # Values below p80 fade to zero; above p80 get rescaled
+    p80 = np.percentile(resampled, 80)
+    resampled = np.clip((resampled - p80) / (1.0 - p80 + 1e-9), 0, 1)
+
+    # Power curve (sqrt) to widen ridges — makes structures broader
+    resampled = np.power(resampled, 0.6)
+
+    # Final polish smooth for silky geometry
+    resampled = gaussian_filter(resampled, sigma=2.0)
+
+    # Re-normalize
+    vmax = resampled.max()
+    if vmax > 0:
+        resampled /= vmax
 
     heights = [round(float(h), 4) for h in resampled.flatten()]
     return {"heights": heights, "rows": grid_rows, "cols": grid_cols}
@@ -104,18 +129,16 @@ const ROWS = grid.rows;
 const COLS = grid.cols;
 const H = grid.heights;
 
-/* ── Color stops: deep purple → blue → cyan → neon yellow ── */
+/* ── Color stops: dark purple → blue → cyan → yellow (clean gradient) ── */
 const STOPS = [
-  [0.00, 0.06, 0.01, 0.12],
-  [0.12, 0.10, 0.04, 0.28],
-  [0.25, 0.12, 0.12, 0.50],
-  [0.38, 0.06, 0.28, 0.62],
-  [0.50, 0.04, 0.45, 0.72],
-  [0.62, 0.02, 0.62, 0.68],
-  [0.74, 0.10, 0.78, 0.55],
-  [0.85, 0.45, 0.88, 0.30],
-  [0.93, 0.78, 0.94, 0.18],
-  [1.00, 0.96, 1.00, 0.12],
+  [0.00, 0.05, 0.02, 0.10],
+  [0.20, 0.08, 0.08, 0.35],
+  [0.40, 0.06, 0.22, 0.55],
+  [0.55, 0.04, 0.40, 0.68],
+  [0.70, 0.05, 0.60, 0.70],
+  [0.82, 0.20, 0.75, 0.50],
+  [0.92, 0.60, 0.85, 0.25],
+  [1.00, 0.90, 0.92, 0.15],
 ];
 
 function colorAt(t) {{
@@ -149,7 +172,7 @@ document.body.appendChild(renderer.domElement);
 /* ── Scene ── */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
-scene.fog = new THREE.FogExp2(BG, 0.06);
+scene.fog = new THREE.FogExp2(BG, 0.045);
 
 /* ── Camera ── */
 const camera = new THREE.PerspectiveCamera(
@@ -169,7 +192,7 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.4;
 
 /* ── Geometry: PlaneGeometry displaced by volume ── */
-const W = 10, D = 7, HSCALE = 3.2;
+const W = 10, D = 7, HSCALE = 2.4;
 const geo = new THREE.PlaneGeometry(W, D, COLS - 1, ROWS - 1);
 geo.rotateX(-Math.PI / 2);
 
@@ -217,13 +240,13 @@ mat.onBeforeCompile = (shader) => {{
     'void main() {{',
     'varying float vEmissive;\\nvoid main() {{'
   );
-  /* Boost emissive output for peaks */
+  /* Emissive only on dominant peaks (top ~15%) */
   shader.fragmentShader = shader.fragmentShader.replace(
     '#include <emissivemap_fragment>',
     `#include <emissivemap_fragment>
-     float ep = smoothstep(0.45, 1.0, vEmissive);
-     vec3 peakGlow = mix(vec3(0.0, 0.35, 0.6), vec3(0.7, 0.95, 0.2), smoothstep(0.7, 1.0, vEmissive));
-     totalEmissiveRadiance += peakGlow * ep * 1.8;`
+     float ep = smoothstep(0.7, 0.95, vEmissive);
+     vec3 peakGlow = mix(vec3(0.0, 0.25, 0.45), vec3(0.5, 0.75, 0.15), smoothstep(0.85, 1.0, vEmissive));
+     totalEmissiveRadiance += peakGlow * ep * 0.9;`
   );
 }};
 
@@ -285,8 +308,8 @@ const rim = new THREE.DirectionalLight(0x7733cc, 0.45);
 rim.position.set(0, 3, -10);
 scene.add(rim);
 
-/* Warm accent from below-front for depth */
-const accent = new THREE.PointLight(0x00ccaa, 0.3, 20);
+/* Subtle accent from below-front for depth */
+const accent = new THREE.PointLight(0x00997a, 0.15, 18);
 accent.position.set(2, -1, 4);
 scene.add(accent);
 
@@ -296,9 +319,9 @@ composer.addPass(new RenderPass(scene, camera));
 
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.55,   /* strength */
-  0.6,    /* radius */
-  0.35    /* threshold */
+  0.3,    /* strength — subtle, not overwhelming */
+  0.5,    /* radius */
+  0.55    /* threshold — only bright peaks bloom */
 );
 composer.addPass(bloomPass);
 

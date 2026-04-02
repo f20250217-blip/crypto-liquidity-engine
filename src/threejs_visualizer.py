@@ -64,8 +64,8 @@ def _build_exchange_profiles(data: dict, n_bins: int = 300) -> dict:
         if global_max > 0:
             p = p / global_max
 
-        p55 = np.percentile(p, 55)
-        p = np.clip((p - p55) / (1.0 - p55 + 1e-9), 0, 1)
+        p60 = np.percentile(p, 60)
+        p = np.clip((p - p60) / (1.0 - p60 + 1e-9), 0, 1)
 
         p = np.power(p, 0.5)
         p = gaussian_filter(p, sigma=1.8)
@@ -223,8 +223,13 @@ def _build_3d_html(payload_json: str) -> str:
 <title>3D Liquidity Engine — BTC/USDT</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#05070a; overflow:hidden; font-family:'Consolas','Menlo',monospace; }}
+  body {{ background:#000; overflow:hidden; font-family:'Consolas','Menlo',monospace; }}
   canvas {{ display:block; }}
+  /* Vertical background gradient via overlay */
+  #bg-grad {{
+    position:fixed; top:0; left:0; width:100%; height:100%; z-index:-1;
+    background:linear-gradient(to bottom, #02040a 0%, #000000 100%);
+  }}
 
   #tooltip {{
     position:fixed; pointer-events:none; display:none;
@@ -253,6 +258,7 @@ def _build_3d_html(payload_json: str) -> str:
 </style>
 </head>
 <body>
+<div id="bg-grad"></div>
 <div id="tooltip"></div>
 <div id="legend">
   <div class="l-title">Volume Scale</div>
@@ -287,6 +293,9 @@ def _build_3d_html(payload_json: str) -> str:
 import * as THREE from 'three';
 import {{ OrbitControls }} from 'three/addons/controls/OrbitControls.js';
 import {{ CSS2DRenderer, CSS2DObject }} from 'three/addons/renderers/CSS2DRenderer.js';
+import {{ EffectComposer }} from 'three/addons/postprocessing/EffectComposer.js';
+import {{ RenderPass }} from 'three/addons/postprocessing/RenderPass.js';
+import {{ UnrealBloomPass }} from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 /* ═══════════════════ DATA ═══════════════════ */
 const D = {payload_json};
@@ -303,8 +312,8 @@ const BID_ASK = D.bid_ask;
 const SW = 14;            // surface width (X)
 const SD = 3.0;           // strip depth (Z) per exchange
 const GAP = 1.5;          // gap between strips
-const HY = 2.6;           // height scale (Y)
-const BG = 0x05070a;
+const HY = 3.4;           // height scale (Y) — exaggerated for drama
+const BG = 0x020408;
 const TD = EX.length * SD + (EX.length - 1) * GAP;
 const SROWS = 26;         // Z subdivisions per strip
 
@@ -337,7 +346,7 @@ const renderer = new THREE.WebGLRenderer({{ antialias:true }});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 0.95;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -354,11 +363,11 @@ document.body.appendChild(labelR.domElement);
 /* ═══════════════════ SCENE ═══════════════════ */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
-scene.fog = new THREE.FogExp2(BG, 0.012);
+scene.fog = new THREE.FogExp2(BG, 0.032);
 
 /* ═══════════════════ CAMERA ═══════════════════ */
-const camera = new THREE.PerspectiveCamera(38, window.innerWidth/window.innerHeight, 0.1, 400);
-camera.position.set(14, 9, TD + 12);
+const camera = new THREE.PerspectiveCamera(34, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(12, 5.5, TD + 10);
 
 /* ═══════════════════ CONTROLS ═══════════════════ */
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -367,9 +376,9 @@ controls.dampingFactor = 0.06;
 controls.minDistance = 5;
 controls.maxDistance = 50;
 controls.maxPolarAngle = Math.PI * 0.46;
-controls.target.set(0, 0.8, TD * 0.45);
+controls.target.set(0, 1.0, TD * 0.4);
 controls.autoRotate = true;
-controls.autoRotateSpeed = 0.18;
+controls.autoRotateSpeed = 0.15;
 
 /* ═══════════════════ HELPERS ═══════════════════ */
 function mkLabel(text, size, color, bold) {{
@@ -381,9 +390,9 @@ function mkLabel(text, size, color, bold) {{
 
 function xWorld(binIdx) {{ return -SW/2 + (binIdx/NB) * SW; }}
 
-const axisMat = new THREE.LineBasicMaterial({{ color:0x253548, transparent:true, opacity:0.65 }});
-const tickMat = new THREE.LineBasicMaterial({{ color:0x304868, transparent:true, opacity:0.45 }});
-const guideMat = new THREE.LineBasicMaterial({{ color:0x182838, transparent:true, opacity:0.15 }});
+const axisMat = new THREE.LineBasicMaterial({{ color:0x1a2838, transparent:true, opacity:0.45 }});
+const tickMat = new THREE.LineBasicMaterial({{ color:0x1e3048, transparent:true, opacity:0.3 }});
+const guideMat = new THREE.LineBasicMaterial({{ color:0x101820, transparent:true, opacity:0.08 }});
 
 function addLine(pts, mat) {{
   const g = new THREE.BufferGeometry().setFromPoints(pts);
@@ -393,7 +402,7 @@ function addLine(pts, mat) {{
 /* ═══════════════════ 3D AXES ═══════════════════ */
 // X axis (Price)
 addLine([new THREE.Vector3(-SW/2, 0, -0.4), new THREE.Vector3(SW/2, 0, -0.4)], axisMat);
-const xT = mkLabel('Price (USDT)', 11, '#4a7a9a', true);
+const xT = mkLabel('Price (USDT)', 11, '#2a4a60', true);
 xT.position.set(0, -0.2, -1.2);
 scene.add(xT);
 
@@ -403,7 +412,7 @@ D.price_labels.forEach(pl => {{
   addLine([new THREE.Vector3(x, 0, -0.4), new THREE.Vector3(x, -0.12, -0.4)], tickMat);
   // Vertical guide line from tick up
   addLine([new THREE.Vector3(x, 0, -0.4), new THREE.Vector3(x, 0, TD+0.3)], guideMat);
-  const lb = mkLabel(pl.val.toLocaleString(), 8, '#4a6a85', false);
+  const lb = mkLabel(pl.val.toLocaleString(), 8, '#283848', false);
   lb.position.set(x, -0.3, -0.4);
   scene.add(lb);
 }});
@@ -411,7 +420,7 @@ D.price_labels.forEach(pl => {{
 // Y axis (Volume)
 const yH = HY * 1.15;
 addLine([new THREE.Vector3(-SW/2-0.4, 0, -0.4), new THREE.Vector3(-SW/2-0.4, yH, -0.4)], axisMat);
-const yT = mkLabel('Volume', 11, '#4a7a9a', true);
+const yT = mkLabel('Volume', 11, '#2a4a60', true);
 yT.position.set(-SW/2-1.0, yH*0.55, -0.4);
 scene.add(yT);
 
@@ -420,19 +429,19 @@ for (let i = 0; i <= 5; i++) {{
   addLine([new THREE.Vector3(-SW/2-0.4, y, -0.4), new THREE.Vector3(-SW/2-0.6, y, -0.4)], tickMat);
   // Horizontal guide line across floor
   addLine([new THREE.Vector3(-SW/2, y, -0.4), new THREE.Vector3(SW/2, y, -0.4)], guideMat);
-  const lb = mkLabel(Math.round((i/5)*100)+'%', 8, '#4a6a85', false);
+  const lb = mkLabel(Math.round((i/5)*100)+'%', 8, '#283848', false);
   lb.position.set(-SW/2-0.85, y, -0.4);
   scene.add(lb);
 }}
 
 // Z axis (Exchange)
 addLine([new THREE.Vector3(-SW/2-0.4, 0, -0.4), new THREE.Vector3(-SW/2-0.4, 0, TD+0.4)], axisMat);
-const zT = mkLabel('Exchange', 11, '#4a7a9a', true);
+const zT = mkLabel('Exchange', 11, '#2a4a60', true);
 zT.position.set(-SW/2-1.0, -0.2, TD*0.5);
 scene.add(zT);
 
 /* ═══════════════════ BACK WALL GRID ═══════════════════ */
-const backWallMat = new THREE.LineBasicMaterial({{ color:0x141e30, transparent:true, opacity:0.12 }});
+const backWallMat = new THREE.LineBasicMaterial({{ color:0x0c1420, transparent:true, opacity:0.06 }});
 // Vertical lines on back wall
 for (let i = 0; i <= 10; i++) {{
   const x = -SW/2 + (i/10)*SW;
@@ -466,6 +475,10 @@ EX.forEach((ex, ei) => {{
   const pos = geo.attributes.position;
   const cols = new Float32Array(pos.count*3);
 
+  // Find peak threshold for this exchange (top ~20%)
+  const sorted = [...prof].sort((a,b) => b-a);
+  const peakThresh = sorted[Math.floor(sorted.length * 0.12)] || 0.5;
+
   for (let i = 0; i < pos.count; i++) {{
     const c = i % NB;
     const r = Math.floor(i / NB);
@@ -477,10 +490,12 @@ EX.forEach((ex, ei) => {{
     pos.setY(i, fH * HY);
     pos.setZ(i, pos.getZ(i) + zOff + SD/2);
 
-    // Color = height + slope brightness boost
-    const slopeBoost = 1.0 + (slope[c] || 0) * 0.5;
+    // Visual hierarchy: dim non-peak areas, brighten peaks
+    const isPeak = h >= peakThresh;
+    const slopeBoost = 1.0 + (slope[c] || 0) * 0.4;
+    const hierarchyDim = isPeak ? Math.min(slopeBoost, 1.4) : 0.4 + fH * 0.5;
     const col = colorAt(fH);
-    col.multiplyScalar(Math.min(slopeBoost, 1.35));
+    col.multiplyScalar(hierarchyDim);
     cols[i*3] = col.r; cols[i*3+1] = col.g; cols[i*3+2] = col.b;
   }}
 
@@ -488,7 +503,7 @@ EX.forEach((ex, ei) => {{
   geo.computeVertexNormals();
 
   const mat = new THREE.MeshStandardMaterial({{
-    vertexColors:true, roughness:0.42, metalness:0.06,
+    vertexColors:true, roughness:0.38, metalness:0.10,
     flatShading:false, side:THREE.DoubleSide,
   }});
   const mesh = new THREE.Mesh(geo, mat);
@@ -546,8 +561,8 @@ EX.forEach((ex, ei) => {{
 
 /* ═══════════════════ LIQUIDITY WALL MARKERS + DROP LINES ═══════════════════ */
 const wallMarkerMat = new THREE.MeshStandardMaterial({{
-  color:0xf0c040, emissive:0xf0c040, emissiveIntensity:0.6,
-  roughness:0.3, metalness:0.1, transparent:true, opacity:0.85,
+  color:0xf0c040, emissive:0xf0c040, emissiveIntensity:1.2,
+  roughness:0.2, metalness:0.05, transparent:true, opacity:0.9,
 }});
 const dropMat = new THREE.LineBasicMaterial({{ color:0xf0c040, transparent:true, opacity:0.2 }});
 const wallLabelData = [];
@@ -561,7 +576,7 @@ EX.forEach((ex, ei) => {{
     const y = w.height * HY;
 
     // Marker sphere
-    const sGeo = new THREE.IcosahedronGeometry(0.06, 1);
+    const sGeo = new THREE.IcosahedronGeometry(0.09, 2);
     const sMesh = new THREE.Mesh(sGeo, wallMarkerMat);
     sMesh.position.set(x, y, zMid);
     scene.add(sMesh);
@@ -632,10 +647,10 @@ mpLbl.position.set(mpX, -0.18, -0.4);
 scene.add(mpLbl);
 
 /* ═══════════════════ FLOOR ═══════════════════ */
-const floorGrid = new THREE.GridHelper(24, 36, 0x121c2c, 0x0a1218);
+const floorGrid = new THREE.GridHelper(24, 36, 0x0a1420, 0x060c14);
 floorGrid.position.set(0, -0.01, TD*0.4);
 floorGrid.material.transparent = true;
-floorGrid.material.opacity = 0.18;
+floorGrid.material.opacity = 0.12;
 scene.add(floorGrid);
 
 const floorGeo = new THREE.PlaneGeometry(SW*1.8, TD*1.8);
@@ -648,27 +663,47 @@ floorMesh.position.set(0, -0.03, TD*0.4);
 floorMesh.receiveShadow = true;
 scene.add(floorMesh);
 
-/* ═══════════════════ LIGHTING ═══════════════════ */
-scene.add(new THREE.AmbientLight(0x181828, 0.55));
+/* ═══════════════════ LIGHTING (cinematic) ═══════════════════ */
+// Very low ambient — most of scene in shadow
+scene.add(new THREE.AmbientLight(0x0c0c20, 0.4));
 
-const keyL = new THREE.DirectionalLight(0xe4e8ff, 1.25);
-keyL.position.set(10, 16, 6);
-keyL.castShadow = true;
-keyL.shadow.mapSize.width = 1024;
-keyL.shadow.mapSize.height = 1024;
-keyL.shadow.camera.near = 1; keyL.shadow.camera.far = 40;
-keyL.shadow.camera.left = -14; keyL.shadow.camera.right = 14;
-keyL.shadow.camera.top = 14; keyL.shadow.camera.bottom = -14;
-keyL.shadow.bias = -0.002;
-scene.add(keyL);
+// Spotlight on center of surface — creates dramatic falloff
+const spot = new THREE.SpotLight(0xd0e0ff, 2.5, 45, Math.PI*0.28, 0.4, 1.2);
+spot.position.set(4, 18, TD*0.4);
+spot.target.position.set(0, 0, TD*0.4);
+spot.castShadow = true;
+spot.shadow.mapSize.width = 1024;
+spot.shadow.mapSize.height = 1024;
+spot.shadow.camera.near = 2; spot.shadow.camera.far = 40;
+spot.shadow.bias = -0.002;
+scene.add(spot);
+scene.add(spot.target);
 
-const fillL = new THREE.DirectionalLight(0x2a4488, 0.35);
-fillL.position.set(-8, 7, -6);
+// Subtle fill from opposite side
+const fillL = new THREE.DirectionalLight(0x1a3060, 0.2);
+fillL.position.set(-8, 6, -6);
 scene.add(fillL);
 
-const rimL = new THREE.DirectionalLight(0x443870, 0.2);
-rimL.position.set(0, 5, -12);
+// Faint rim from behind for edge definition
+const rimL = new THREE.DirectionalLight(0x2a2048, 0.12);
+rimL.position.set(0, 4, -14);
 scene.add(rimL);
+
+// Sweeping accent light — animates across surface
+const sweepL = new THREE.PointLight(0x20a0c0, 0.8, 18, 1.8);
+sweepL.position.set(0, 3, TD*0.4);
+scene.add(sweepL);
+
+/* ═══════════════════ BLOOM POST-PROCESSING ═══════════════════ */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.35,   // strength — restrained, only wall markers bloom visibly
+  0.4,    // radius
+  0.65    // threshold — high so only emissive markers trigger bloom
+);
+composer.addPass(bloomPass);
 
 /* ═══════════════════ TOOLTIP ═══════════════════ */
 const ray = new THREE.Raycaster();
@@ -729,10 +764,18 @@ renderer.domElement.addEventListener('mousemove', (e) => {{
 renderer.domElement.addEventListener('mouseleave', () => {{ tip.style.display='none'; }});
 
 /* ═══════════════════ RENDER LOOP ═══════════════════ */
+const clock = new THREE.Clock();
+
 function animate() {{
   requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Sweep light glides across surface (signature animation)
+  sweepL.position.x = Math.sin(t * 0.3) * SW * 0.45;
+  sweepL.position.z = TD * 0.4 + Math.cos(t * 0.2) * TD * 0.3;
+
   controls.update();
-  renderer.render(scene, camera);
+  composer.render();
   labelR.render(scene, camera);
 }}
 animate();
@@ -743,6 +786,7 @@ window.addEventListener('resize', () => {{
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   labelR.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 }});
 </script>
 </body>

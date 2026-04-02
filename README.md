@@ -1,6 +1,6 @@
 # Cross-Exchange Crypto Liquidity & Order Flow Engine
 
-Real-time order book depth analysis across Binance, Coinbase, and Kraken with interactive 3D visualization.
+Real-time order book depth analysis across Binance, Coinbase, and Kraken with interactive 3D visualization and automated liquidity wall detection.
 
 ## 3D Liquidity Surface
 
@@ -14,21 +14,38 @@ The 3D surface maps **order book liquidity** across three dimensions:
 
 | Axis | Dimension | Description |
 |------|-----------|-------------|
-| **X** | Price (USDT) | BTC/USDT price range across all observed levels |
+| **X** | Price (USDT) | BTC/USDT price range with numeric tick labels |
 | **Z** | Exchange | Binance, Coinbase, Kraken — each as a separate surface strip |
-| **Y** | Volume | Aggregated order book depth at each price level |
+| **Y** | Volume | Aggregated order book depth at each price level (relative %) |
 
-Peaks represent **liquidity walls** — price levels where large volumes of orders are concentrated. The color gradient maps volume intensity from dark purple (low) through blue and cyan to yellow (extreme).
+## How to Read the Visualization
+
+**Liquidity walls** — Tall peaks marked with yellow price labels. These are price levels where large volumes of resting orders concentrate. Walls often act as support/resistance because filling them requires significant capital.
+
+**Contour lines** — Rectangles projected on the floor beneath each exchange strip. Each contour level (15%, 30%, 50%, 70%, 90%) shows the footprint of the liquidity zone at that depth. Wider contours mean broader, more stable liquidity.
+
+**Mid-price plane** — The faint blue vertical plane marks the center of the observed price range. Orders to the left are bids (buy-side), to the right are asks (sell-side).
+
+**Bid/Ask lines** — Green lines mark bid-side volume peaks, red lines mark ask-side peaks. The distance between them on each exchange indicates the effective spread.
+
+**Cross-exchange comparison** — Separated strips along the Z axis let you compare where each exchange concentrates depth. Matching peaks across exchanges signal consensus-driven support/resistance. Mismatches may indicate arbitrage opportunity or exchange-specific positioning.
+
+**Color gradient** — Maps volume intensity: deep purple (low) through blue and cyan to yellow (extreme concentration).
 
 ## Features
 
 - Time-series order book collection (configurable sample count and interval)
-- Per-exchange depth profiles with noise suppression and ridge extraction
-- Multi-exchange 3D surface with labeled axes, tick marks, and price labels
-- Bid/ask indicator lines per exchange
-- Hover tooltips showing exchange, price, and relative volume
+- 300-bin high-resolution depth profiles per exchange
+- Automated liquidity wall detection via peak finding (prominence + height thresholds)
+- Multi-level floor contour projection (5 density levels)
+- Slope-based color modulation (steeper walls render brighter)
+- Wireframe structural overlay
+- Mid-price reference plane
+- Bid/ask peak indicator lines per exchange
+- Hover tooltips: exchange, price, relative volume, side, imbalance
+- Legend panel with color scale, overlay key, and axis reference
+- Back-wall and side-wall grid for scale reference
 - Multi-panel dashboard with imbalance sparklines
-- Interactive WebGL camera (rotate, zoom, pan)
 
 ## Metrics
 
@@ -61,8 +78,8 @@ Configure in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10), `
 
 | File | Description |
 |------|-------------|
-| `output/3d_liquidity_pro.html` | Interactive 3D liquidity surface (WebGL) |
-| `output/dashboard.html` | Multi-panel dashboard with 3D view + metrics + sparklines |
+| `output/3d_liquidity_pro.html` | Interactive 3D liquidity surface with axes, walls, contours, tooltips |
+| `output/dashboard.html` | Multi-panel dashboard: 3D view + metrics table + imbalance sparklines |
 
 ## Project Structure
 

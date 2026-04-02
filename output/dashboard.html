@@ -7,122 +7,102 @@
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:#05070a; color:#b0c4d4; font-family:'Consolas','Menlo',monospace; }
   .header {
-    padding: 20px 30px; border-bottom: 1px solid #141e30;
-    display: flex; justify-content: space-between; align-items: center;
+    padding:16px 24px; border-bottom:1px solid #141e30;
+    display:flex; justify-content:space-between; align-items:center;
   }
-  .header h1 { color: #d0e0f0; font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
-  .header .meta { font-size: 11px; color: #5a7a90; }
-  .panels { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr auto; height: calc(100vh - 60px); }
-  .panel {
-    border: 1px solid #141e30; position: relative; overflow: hidden;
-  }
+  .header h1 { color:#d0e0f0; font-size:15px; font-weight:600; letter-spacing:0.4px; }
+  .header .meta { font-size:10px; color:#5a7a90; }
+  .panels { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr auto; height:calc(100vh - 52px); }
+  .panel { border:1px solid #141e30; position:relative; overflow:hidden; }
   .panel-title {
-    position: absolute; top: 10px; left: 14px; font-size: 10px;
-    color: #4a7090; text-transform: uppercase; letter-spacing: 1px; z-index: 10;
+    position:absolute; top:8px; left:12px; font-size:9px;
+    color:#4a7090; text-transform:uppercase; letter-spacing:1px; z-index:10;
   }
-  .panel-3d { grid-column: 1 / -1; min-height: 55vh; }
-  .panel-3d iframe {
-    width: 100%; height: 100%; border: none; display: block;
-  }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; color: #4a7090; font-weight: 400; padding: 8px 12px;
-       text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px;
-       border-bottom: 1px solid #141e30; }
-  td { padding: 8px 12px; border-bottom: 1px solid #0c1420; }
-  .sparkline-panel { padding: 16px; }
-  .spark-row { display: flex; align-items: center; margin-bottom: 10px; gap: 12px; }
-  .spark-label { width: 80px; font-size: 11px; font-weight: 600; }
-  .spark-canvas { flex: 1; height: 28px; }
+  .panel-3d { grid-column:1/-1; min-height:58vh; }
+  .panel-3d iframe { width:100%; height:100%; border:none; display:block; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { text-align:left; color:#4a7090; font-weight:400; padding:6px 10px;
+       text-transform:uppercase; font-size:9px; letter-spacing:0.5px;
+       border-bottom:1px solid #141e30; }
+  td { padding:6px 10px; border-bottom:1px solid #0c1420; }
+  .spark-panel { padding:14px; }
+  .spark-row { display:flex; align-items:center; margin-bottom:8px; gap:10px; }
+  .spark-label { width:72px; font-size:10px; font-weight:600; }
+  .spark-canvas { flex:1; height:26px; }
 </style>
 </head>
 <body>
 <div class="header">
   <h1>Cross-Exchange Liquidity Dashboard — BTC/USDT</h1>
-  <div class="meta">8 snapshots &middot; 68124.33 — 68355.35 USDT</div>
+  <div class="meta">8 snapshots &middot; 68356.47 — 68653.1 USDT</div>
 </div>
 <div class="panels">
   <div class="panel panel-3d">
     <div class="panel-title">3D Liquidity Surface</div>
     <iframe src="3d_liquidity_pro.html"></iframe>
   </div>
-  <div class="panel" style="padding:16px;">
+  <div class="panel" style="padding:14px;">
     <div class="panel-title">Exchange Metrics</div>
-    <table style="margin-top:28px;">
+    <table style="margin-top:24px;">
       <tr><th>Exchange</th><th>Last Imbalance</th><th>Avg Imbalance</th></tr>
       
         <tr>
-          <td style="color:{'#f0b90b' if ex=='Binance' else '#0052ff' if ex=='Coinbase' else '#7b3fe4'};font-weight:600">Binance</td>
-          <td style="color:#ff4455">-0.9124</td>
-          <td>-0.5451</td>
+          <td style="color:#f0b90b;font-weight:600">Binance</td>
+          <td style="color:#00cc66">+0.6541</td>
+          <td>+0.0269</td>
         </tr>
         <tr>
-          <td style="color:{'#f0b90b' if ex=='Binance' else '#0052ff' if ex=='Coinbase' else '#7b3fe4'};font-weight:600">Coinbase</td>
-          <td style="color:#00cc66">+0.0948</td>
-          <td>+0.1350</td>
+          <td style="color:#0052ff;font-weight:600">Coinbase</td>
+          <td style="color:#00cc66">+0.1465</td>
+          <td>+0.0958</td>
+        </tr>
+        <tr>
+          <td style="color:#7b3fe4;font-weight:600">Kraken</td>
+          <td style="color:#ff4455">+0.0000</td>
+          <td>-0.0181</td>
         </tr>
     </table>
   </div>
-  <div class="panel sparkline-panel">
+  <div class="panel spark-panel">
     <div class="panel-title">Imbalance Over Time</div>
-    <div id="sparklines" style="margin-top:28px;"></div>
+    <div id="sparklines" style="margin-top:24px;"></div>
   </div>
 </div>
 <script>
-const sparkData = {"Binance":[-0.9281,-0.0821,-0.7604,-0.6826,-0.7227,0.4909,-0.7638,-0.9124],"Coinbase":[-0.3558,0.1448,0.2985,0.2881,0.3144,-0.0137,0.3085,0.0948]};
-const exColors = { Binance: '#f0b90b', Coinbase: '#0052ff', Kraken: '#7b3fe4' };
-const container = document.getElementById('sparklines');
+const sparkData = {"Binance":[-0.6452,0.7003,0.327,0.6811,-0.0793,-0.614,-0.8089,0.6541],"Coinbase":[-0.1348,-0.0148,0.2507,0.1774,0.136,0.1946,0.0109,0.1465],"Kraken":[0.0,0.0,0.0,0.0,-0.1057,0.0,-0.0392,0.0]};
+const exColors = { Binance:'#f0b90b', Coinbase:'#0052ff', Kraken:'#7b3fe4' };
+const ctr = document.getElementById('sparklines');
 
 Object.entries(sparkData).forEach(([ex, vals]) => {
   const row = document.createElement('div');
   row.className = 'spark-row';
+  const lbl = document.createElement('div');
+  lbl.className = 'spark-label';
+  lbl.style.color = exColors[ex]||'#88aacc';
+  lbl.textContent = ex;
+  const cvs = document.createElement('canvas');
+  cvs.className = 'spark-canvas';
+  cvs.height = 26;
+  row.appendChild(lbl); row.appendChild(cvs); ctr.appendChild(row);
 
-  const label = document.createElement('div');
-  label.className = 'spark-label';
-  label.style.color = exColors[ex] || '#88aacc';
-  label.textContent = ex;
-
-  const canvas = document.createElement('canvas');
-  canvas.className = 'spark-canvas';
-  canvas.height = 28;
-
-  row.appendChild(label);
-  row.appendChild(canvas);
-  container.appendChild(row);
-
-  // Draw sparkline
   requestAnimationFrame(() => {
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = 56;
-    canvas.style.height = '28px';
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-
+    cvs.width = cvs.offsetWidth*2; cvs.height = 52; cvs.style.height = '26px';
+    const ctx = cvs.getContext('2d');
+    const w = cvs.width, h = cvs.height;
     if (vals.length < 2) return;
-
     const mn = Math.min(...vals), mx = Math.max(...vals);
-    const range = mx - mn || 1;
-    const pad = 4;
+    const rng = mx-mn||1; const pad = 4;
 
-    // Zero line
-    const zeroY = h - pad - ((0 - mn) / range) * (h - pad * 2);
-    ctx.strokeStyle = 'rgba(60,80,100,0.3)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(0, zeroY);
-    ctx.lineTo(w, zeroY);
-    ctx.stroke();
+    const zy = h-pad-((0-mn)/rng)*(h-pad*2);
+    ctx.strokeStyle = 'rgba(50,70,90,0.3)'; ctx.lineWidth = 1;
+    ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(0,zy); ctx.lineTo(w,zy); ctx.stroke();
     ctx.setLineDash([]);
 
-    // Sparkline
-    ctx.strokeStyle = exColors[ex] || '#88aacc';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    vals.forEach((v, i) => {
-      const x = (i / (vals.length - 1)) * w;
-      const y = h - pad - ((v - mn) / range) * (h - pad * 2);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    ctx.strokeStyle = exColors[ex]||'#88aacc'; ctx.lineWidth = 2; ctx.beginPath();
+    vals.forEach((v,i) => {
+      const x = (i/(vals.length-1))*w;
+      const y = h-pad-((v-mn)/rng)*(h-pad*2);
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     });
     ctx.stroke();
   });

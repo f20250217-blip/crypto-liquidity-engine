@@ -2,75 +2,75 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Liquidity Dashboard — BTC/USDT</title>
+<title>Liquidity Dashboard</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#05070a; color:#b0c4d4; font-family:'Consolas','Menlo',monospace; }
+  body { background:#06070a; color:#7a8a98; font-family:'Inter','Helvetica Neue',sans-serif; }
   .header {
-    padding:16px 24px; border-bottom:1px solid #141e30;
+    padding:16px 24px; border-bottom:1px solid rgba(40,50,60,0.3);
     display:flex; justify-content:space-between; align-items:center;
   }
-  .header h1 { color:#d0e0f0; font-size:15px; font-weight:600; letter-spacing:0.4px; }
-  .header .meta { font-size:10px; color:#5a7a90; }
+  .header h1 { color:#90a0b0; font-size:13px; font-weight:500; letter-spacing:0.5px; }
+  .header .meta { font-size:10px; color:rgba(100,120,140,0.4); }
   .panels { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr auto; height:calc(100vh - 52px); }
-  .panel { border:1px solid #141e30; position:relative; overflow:hidden; }
+  .panel { border:1px solid rgba(40,50,60,0.2); position:relative; overflow:hidden; }
   .panel-title {
-    position:absolute; top:8px; left:12px; font-size:9px;
-    color:#4a7090; text-transform:uppercase; letter-spacing:1px; z-index:10;
+    position:absolute; top:10px; left:14px; font-size:9px;
+    color:rgba(100,120,140,0.35); text-transform:uppercase; letter-spacing:1.2px; z-index:10;
   }
-  .panel-3d { grid-column:1/-1; min-height:58vh; }
+  .panel-3d { grid-column:1/-1; min-height:60vh; }
   .panel-3d iframe { width:100%; height:100%; border:none; display:block; }
   table { width:100%; border-collapse:collapse; font-size:11px; }
-  th { text-align:left; color:#4a7090; font-weight:400; padding:6px 10px;
-       text-transform:uppercase; font-size:9px; letter-spacing:0.5px;
-       border-bottom:1px solid #141e30; }
-  td { padding:6px 10px; border-bottom:1px solid #0c1420; }
-  .spark-panel { padding:14px; }
-  .spark-row { display:flex; align-items:center; margin-bottom:8px; gap:10px; }
-  .spark-label { width:72px; font-size:10px; font-weight:600; }
+  th { text-align:left; color:rgba(100,120,140,0.35); font-weight:400; padding:8px 12px;
+       text-transform:uppercase; font-size:8px; letter-spacing:0.8px;
+       border-bottom:1px solid rgba(40,50,60,0.2); }
+  td { padding:8px 12px; border-bottom:1px solid rgba(30,40,50,0.15); }
+  .spark-panel { padding:16px; }
+  .spark-row { display:flex; align-items:center; margin-bottom:10px; gap:12px; }
+  .spark-label { width:72px; font-size:10px; font-weight:500; }
   .spark-canvas { flex:1; height:26px; }
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>Cross-Exchange Liquidity Dashboard — BTC/USDT</h1>
-  <div class="meta">8 snapshots &middot; 66017.12 — 66238.75 USDT</div>
+  <h1>Cross-Exchange Liquidity Dashboard</h1>
+  <div class="meta">30 snapshots &middot; 66069.99 — 66330.12 USDT</div>
 </div>
 <div class="panels">
   <div class="panel panel-3d">
     <div class="panel-title">3D Liquidity Surface</div>
     <iframe src="3d_liquidity_pro.html"></iframe>
   </div>
-  <div class="panel" style="padding:14px;">
+  <div class="panel" style="padding:16px;">
     <div class="panel-title">Exchange Metrics</div>
-    <table style="margin-top:24px;">
+    <table style="margin-top:28px;">
       <tr><th>Exchange</th><th>Last Imbalance</th><th>Avg Imbalance</th></tr>
       
         <tr>
-          <td style="color:#f0b90b;font-weight:600">Binance</td>
-          <td style="color:#00cc66">+0.1875</td>
-          <td>+0.3930</td>
+          <td style="color:#b0a070;font-weight:500">Binance</td>
+          <td style="color:#5aaa7a">+0.7166</td>
+          <td>+0.0720</td>
         </tr>
         <tr>
-          <td style="color:#0052ff;font-weight:600">Coinbase</td>
-          <td style="color:#ff4455">-0.0610</td>
-          <td>+0.1299</td>
+          <td style="color:#6080b0;font-weight:500">Coinbase</td>
+          <td style="color:#5aaa7a">+0.0931</td>
+          <td>+0.0174</td>
         </tr>
         <tr>
-          <td style="color:#7b3fe4;font-weight:600">Kraken</td>
-          <td style="color:#ff4455">+0.0000</td>
-          <td>+0.0104</td>
+          <td style="color:#8070a0;font-weight:500">Kraken</td>
+          <td style="color:#aa5a6a">-0.0099</td>
+          <td>-0.0086</td>
         </tr>
     </table>
   </div>
   <div class="panel spark-panel">
     <div class="panel-title">Imbalance Over Time</div>
-    <div id="sparklines" style="margin-top:24px;"></div>
+    <div id="sparklines" style="margin-top:28px;"></div>
   </div>
 </div>
 <script>
-const sparkData = {"Binance":[-0.1612,0.6752,0.8254,0.2104,0.8808,-0.1377,0.6635,0.1875],"Coinbase":[0.2753,0.3006,0.0984,0.2843,0.2835,-0.2925,0.1506,-0.061],"Kraken":[0.0,0.0,0.083,0.0,0.0,0.0,0.0,0.0]};
-const exColors = { Binance:'#f0b90b', Coinbase:'#0052ff', Kraken:'#7b3fe4' };
+const sparkData = {"Binance":[0.5074,0.7479,0.1719,0.4152,-0.8537,0.861,0.441,0.2726,-0.8064,0.4235,-0.8171,0.7442,-0.881,0.6704,-0.5722,0.7092,0.9012,0.1588,-0.7509,0.472,-0.819,0.7933,0.7362,-0.0797,-0.6522,0.0586,-0.8655,-0.6888,0.1461,0.7166],"Coinbase":[-0.0791,-0.1065,-0.049,-0.2287,-0.0992,-0.1742,-0.061,-0.1919,0.0836,-0.1393,0.2821,0.0274,0.0719,-0.0429,0.0552,-0.1022,-0.1577,-0.0807,-0.027,0.1524,0.1713,-0.2393,-0.0116,0.1264,0.1706,0.2732,0.3211,0.3055,0.1777,0.0931],"Kraken":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-0.0428,0.0,0.0,-0.0533,-0.0673,0.0,0.0,-0.0114,-0.0165,0.0046,-0.019,-0.0416,-0.0099]};
+const exColors = { Binance:'#b0a070', Coinbase:'#6080b0', Kraken:'#8070a0' };
 const ctr = document.getElementById('sparklines');
 
 Object.entries(sparkData).forEach(([ex, vals]) => {
@@ -78,7 +78,7 @@ Object.entries(sparkData).forEach(([ex, vals]) => {
   row.className = 'spark-row';
   const lbl = document.createElement('div');
   lbl.className = 'spark-label';
-  lbl.style.color = exColors[ex]||'#88aacc';
+  lbl.style.color = exColors[ex]||'#7a8a98';
   lbl.textContent = ex;
   const cvs = document.createElement('canvas');
   cvs.className = 'spark-canvas';
@@ -94,11 +94,11 @@ Object.entries(sparkData).forEach(([ex, vals]) => {
     const rng = mx-mn||1; const pad = 4;
 
     const zy = h-pad-((0-mn)/rng)*(h-pad*2);
-    ctx.strokeStyle = 'rgba(50,70,90,0.3)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(50,60,70,0.2)'; ctx.lineWidth = 1;
     ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(0,zy); ctx.lineTo(w,zy); ctx.stroke();
     ctx.setLineDash([]);
 
-    ctx.strokeStyle = exColors[ex]||'#88aacc'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.strokeStyle = exColors[ex]||'#7a8a98'; ctx.lineWidth = 1.5; ctx.beginPath();
     vals.forEach((v,i) => {
       const x = (i/(vals.length-1))*w;
       const y = h-pad-((v-mn)/rng)*(h-pad*2);

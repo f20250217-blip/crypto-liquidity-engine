@@ -19,19 +19,12 @@ from scipy.signal import find_peaks
 
 def _build_exchange_profiles(data: dict, n_bins: int = 300) -> dict:
     """
-    Build high-resolution depth profile per exchange with analytical metadata.
+    Build high-resolution depth profile per exchange.
 
-    Pipeline per exchange:
-      1. Average volume across time snapshots
-      2. Log-compress
-      3. Median filter (denoise)
-      4. Resample to n_bins
-      5. Gaussian smooth (preserve structure)
-      6. Soft-threshold bottom 55%
-      7. Power-curve for broader ridges
-      8. Final polish
+    Pipeline: average -> log-compress -> denoise -> resample -> smooth ->
+              hard threshold -> power curve -> normalize.
 
-    Also computes: walls, contours, bid/ask, mid-price, slope, imbalance per bin.
+    Keeps only top structures for a clean, minimal output.
     """
     price_grids = data["price_grids"]
     exchanges = data["exchanges"]
@@ -64,11 +57,13 @@ def _build_exchange_profiles(data: dict, n_bins: int = 300) -> dict:
         if global_max > 0:
             p = p / global_max
 
-        p60 = np.percentile(p, 60)
-        p = np.clip((p - p60) / (1.0 - p60 + 1e-9), 0, 1)
+        # Hard threshold — keep only top 30% of signal
+        p70 = np.percentile(p, 70)
+        p = np.clip((p - p70) / (1.0 - p70 + 1e-9), 0, 1)
 
-        p = np.power(p, 0.5)
-        p = gaussian_filter(p, sigma=1.8)
+        # Sharpen peaks with steeper power curve
+        p = np.power(p, 0.6)
+        p = gaussian_filter(p, sigma=2.0)
 
         pmax = p.max()
         if pmax > 0:
@@ -76,71 +71,34 @@ def _build_exchange_profiles(data: dict, n_bins: int = 300) -> dict:
 
         profiles[ex] = p
 
-    # ── Detect liquidity walls (peaks) ──
+    # ── Detect liquidity walls — keep only strongest ──
     walls = {}
+    all_walls = []
     for ex in exchanges:
         p = profiles[ex]
-        peak_idxs, props = find_peaks(p, height=0.35, distance=n_bins // 20, prominence=0.15)
+        peak_idxs, props = find_peaks(p, height=0.45, distance=n_bins // 15, prominence=0.2)
         wall_list = []
         for idx in peak_idxs:
             wall_list.append({
                 "idx": int(idx),
                 "height": round(float(p[idx]), 3),
                 "price": round(float(price_ticks[idx]), 2),
+                "exchange": ex,
             })
         wall_list.sort(key=lambda w: w["height"], reverse=True)
-        walls[ex] = wall_list[:6]
+        walls[ex] = wall_list[:3]
+        all_walls.extend(wall_list[:3])
 
-    # ── Floor contour paths (analytical) ──
-    contour_levels = [0.15, 0.30, 0.50, 0.70, 0.90]
-    contours = {}
+    # Global top 5 walls for labels
+    all_walls.sort(key=lambda w: w["height"], reverse=True)
+    top_wall_keys = set()
+    for w in all_walls[:5]:
+        top_wall_keys.add((w["exchange"], w["idx"]))
+
+    # Mark which walls get labels
     for ex in exchanges:
-        p = profiles[ex]
-        ex_contours = []
-        for level in contour_levels:
-            segments = []
-            in_region = False
-            start_idx = 0
-            for i in range(n_bins):
-                if p[i] >= level and not in_region:
-                    in_region = True
-                    start_idx = i
-                elif p[i] < level and in_region:
-                    in_region = False
-                    segments.append([start_idx, i - 1])
-            if in_region:
-                segments.append([start_idx, n_bins - 1])
-            ex_contours.append({"level": round(level, 2), "segments": segments})
-        contours[ex] = ex_contours
-
-    # ── Slope (absolute gradient) for color modulation ──
-    slopes = {}
-    for ex in exchanges:
-        p = profiles[ex]
-        grad = np.abs(np.gradient(p))
-        grad_max = grad.max()
-        if grad_max > 0:
-            grad = grad / grad_max
-        slopes[ex] = [round(float(v), 4) for v in grad]
-
-    # ── Mid-price index ──
-    mid_price = (price_min + price_max) / 2.0
-    mid_idx = int(n_bins / 2)
-
-    # ── Bid/Ask per exchange ──
-    bid_ask = {}
-    for ex in exchanges:
-        matrix = price_grids[ex]
-        last = matrix[-1]
-        mid_raw = len(last) // 2
-        bid_peak = np.argmax(last[:mid_raw]) if last[:mid_raw].sum() > 0 else mid_raw - 1
-        ask_peak = mid_raw + np.argmax(last[mid_raw:]) if last[mid_raw:].sum() > 0 else mid_raw
-        bid_ask[ex] = {
-            "bid_idx": round(float(bid_peak / len(last) * n_bins), 1),
-            "ask_idx": round(float(ask_peak / len(last) * n_bins), 1),
-            "bid_price": round(float(price_ticks[min(int(bid_peak / len(last) * n_bins), n_bins - 1)]), 2),
-            "ask_price": round(float(price_ticks[min(int(ask_peak / len(last) * n_bins), n_bins - 1)]), 2),
-        }
+        for w in walls[ex]:
+            w["show_label"] = (ex, w["idx"]) in top_wall_keys
 
     # ── Per-exchange avg imbalance ──
     avg_imbalances = {}
@@ -148,18 +106,13 @@ def _build_exchange_profiles(data: dict, n_bins: int = 300) -> dict:
         imb = imbalance_series.get(ex, [0])
         avg_imbalances[ex] = round(float(np.mean(imb)), 4)
 
-    # ── Price labels (~10 ticks) ──
-    n_labels = 10
+    # ── Price labels (sparse — only 5 ticks) ──
+    n_labels = 5
     step = max(1, n_bins // n_labels)
     price_labels = [
         {"idx": int(i), "val": round(float(price_ticks[i]), 2)}
         for i in range(0, n_bins, step)
     ]
-
-    # ── Raw max volume for axis labels ──
-    raw_maxes = {}
-    for ex in exchanges:
-        raw_maxes[ex] = round(float(np.exp(price_grids[ex].mean(axis=0).max()) - 1), 4)
 
     # Serialize profiles
     profiles_out = {}
@@ -169,18 +122,13 @@ def _build_exchange_profiles(data: dict, n_bins: int = 300) -> dict:
     return {
         "exchanges": exchanges,
         "profiles": profiles_out,
-        "slopes": slopes,
         "n_bins": n_bins,
         "price_labels": price_labels,
         "price_range": [round(float(price_min), 2), round(float(price_max), 2)],
-        "mid_price": round(float(mid_price), 2),
-        "mid_idx": mid_idx,
-        "bid_ask": bid_ask,
+        "mid_price": round(float((price_min + price_max) / 2.0), 2),
+        "mid_idx": int(n_bins / 2),
         "walls": walls,
-        "contours": contours,
-        "contour_levels": contour_levels,
         "avg_imbalances": avg_imbalances,
-        "raw_maxes": raw_maxes,
     }
 
 
@@ -202,7 +150,6 @@ def generate_threejs(data: dict):
     for ex in exchanges:
         spark_data[ex] = [round(float(v), 4) for v in imbalance.get(ex, [0])]
     spark_json = json.dumps(spark_data, separators=(",", ":"))
-    n_samples = len(data.get("timestamps", []))
 
     html_3d = _build_3d_html(payload_json)
     with open("output/3d_liquidity_pro.html", "w") as f:
@@ -220,59 +167,45 @@ def _build_3d_html(payload_json: str) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>3D Liquidity Engine — BTC/USDT</title>
+<title>3D Liquidity Engine</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#0b0f14; overflow:hidden; font-family:'Consolas','Menlo',monospace; }}
+  body {{ background:#08090c; overflow:hidden; font-family:'Inter','Helvetica Neue',sans-serif; }}
   canvas {{ display:block; }}
 
   #tooltip {{
     position:fixed; pointer-events:none; display:none;
-    background:rgba(6,10,18,0.94); border:1px solid rgba(50,160,210,0.35);
-    color:#c0d4e4; padding:10px 14px; border-radius:4px;
-    font-size:11px; line-height:1.6; z-index:100;
-    backdrop-filter:blur(8px); min-width:160px;
+    background:rgba(10,12,18,0.92); border:1px solid rgba(80,140,180,0.2);
+    color:#a0b8c8; padding:10px 14px; border-radius:6px;
+    font-size:11px; line-height:1.7; z-index:100;
+    backdrop-filter:blur(12px); min-width:150px;
+    font-family:'Inter','Helvetica Neue',sans-serif;
   }}
-  #tooltip .t-label {{ color:rgba(80,180,230,0.85); font-size:9px; text-transform:uppercase; letter-spacing:0.6px; }}
-  #tooltip .t-val {{ color:#e0f0ff; font-size:12px; font-weight:500; }}
+  #tooltip .t-label {{ color:rgba(90,150,190,0.6); font-size:9px; text-transform:uppercase; letter-spacing:0.8px; }}
+  #tooltip .t-val {{ color:#d0e4f0; font-size:12px; font-weight:500; }}
   #tooltip .t-row {{ margin-top:3px; }}
-  #tooltip .t-wall {{ color:#f0c040; font-size:9px; margin-top:4px; }}
+  #tooltip .t-wall {{ color:#70d4ff; font-size:9px; margin-top:5px; font-weight:600; letter-spacing:0.5px; }}
 
   #legend {{
-    position:fixed; bottom:10px; right:10px; z-index:90;
-    background:rgba(8,12,20,0.85); border:1px solid rgba(40,60,90,0.3);
-    padding:8px 12px; border-radius:4px; font-size:9px;
-    backdrop-filter:blur(6px); color:#7a9ab0;
+    position:fixed; bottom:16px; right:16px; z-index:90;
+    background:rgba(10,12,18,0.7); border:1px solid rgba(60,80,100,0.15);
+    padding:12px 16px; border-radius:8px; font-size:9px;
+    backdrop-filter:blur(12px); color:rgba(130,160,180,0.6);
+    font-family:'Inter','Helvetica Neue',sans-serif;
   }}
-  #legend .l-title {{ font-size:10px; color:#a0c0d8; font-weight:600; margin-bottom:5px; }}
-  #legend .l-row {{ display:flex; align-items:center; gap:6px; margin:2px 0; }}
-  #legend .l-swatch {{ width:12px; height:2px; border-radius:1px; }}
-  .l-section {{ margin-top:5px; padding-top:4px; border-top:1px solid rgba(40,60,90,0.25); }}
-  .l-section-title {{ font-size:8px; color:#5a7a90; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px; }}
-  #legend .l-axis {{ display:flex; align-items:center; gap:5px; margin:1px 0; font-size:8px; }}
+  #legend .l-title {{ font-size:9px; color:rgba(130,160,180,0.4); font-weight:500; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }}
+  #legend .l-row {{ display:flex; align-items:center; gap:8px; margin:4px 0; }}
+  #legend .l-swatch {{ width:16px; height:2px; border-radius:1px; }}
 </style>
 </head>
 <body>
 <div id="tooltip"></div>
 <div id="legend">
-  <div class="l-title">Volume Scale</div>
-  <div class="l-row"><div class="l-swatch" style="background:#0a0515"></div>Low</div>
-  <div class="l-row"><div class="l-swatch" style="background:#0c3860"></div>Medium</div>
-  <div class="l-row"><div class="l-swatch" style="background:#0a8cad"></div>High</div>
-  <div class="l-row"><div class="l-swatch" style="background:#d0e830"></div>Extreme</div>
-  <div class="l-section">
-    <div class="l-section-title">Overlays</div>
-    <div class="l-row"><div class="l-swatch" style="background:#00cc66"></div>Bid peak</div>
-    <div class="l-row"><div class="l-swatch" style="background:#ff4444"></div>Ask peak</div>
-    <div class="l-row"><div class="l-swatch" style="background:rgba(100,200,255,0.4)"></div>Mid-price</div>
-    <div class="l-row"><div class="l-swatch" style="background:#f0c040"></div>Liquidity wall</div>
-  </div>
-  <div class="l-section">
-    <div class="l-section-title">Axes</div>
-    <div class="l-axis">X &mdash; Price (USDT)</div>
-    <div class="l-axis">Y &mdash; Volume (relative)</div>
-    <div class="l-axis">Z &mdash; Exchange</div>
-  </div>
+  <div class="l-title">Depth</div>
+  <div class="l-row"><div class="l-swatch" style="background:#12102a"></div><span>Low</span></div>
+  <div class="l-row"><div class="l-swatch" style="background:#1a3a6a"></div><span>Mid</span></div>
+  <div class="l-row"><div class="l-swatch" style="background:#50c8e8"></div><span>High</span></div>
+  <div class="l-row"><div class="l-swatch" style="background:#e0f4ff"></div><span>Peak</span></div>
 </div>
 
 <script type="importmap">
@@ -293,33 +226,26 @@ const D = {payload_json};
 const EX = D.exchanges;
 const NB = D.n_bins;
 const PROF = D.profiles;
-const SLOPES = D.slopes;
 const WALLS = D.walls;
-const CONTOURS = D.contours;
-const C_LEVELS = D.contour_levels;
-const BID_ASK = D.bid_ask;
 
 /* ═══════════════════ LAYOUT ═══════════════════ */
-const SW = 14;            // surface width (X)
-const SD = 3.0;           // strip depth (Z) per exchange
-const GAP = 1.5;          // gap between strips
-const HY = 2.6;           // height scale (Y)
-const BG = 0x0b0f14;
+const SW = 14;
+const SD = 3.2;
+const GAP = 2.0;
+const HY = 2.8;
+const BG = 0x08090c;
 const TD = EX.length * SD + (EX.length - 1) * GAP;
-const SROWS = 26;         // Z subdivisions per strip
+const SROWS = 24;
 
-/* ═══════════════════ COLOR RAMP ═══════════════════ */
+/* ═══════════════════ COLOR — 3 stops only ═══════════════════ */
 const CS = [
-  [0.00, 0.10, 0.05, 0.18],
-  [0.12, 0.12, 0.08, 0.35],
-  [0.25, 0.10, 0.18, 0.52],
-  [0.40, 0.08, 0.32, 0.65],
-  [0.55, 0.06, 0.50, 0.72],
-  [0.68, 0.10, 0.65, 0.65],
-  [0.80, 0.30, 0.78, 0.45],
-  [0.90, 0.60, 0.88, 0.25],
-  [0.96, 0.82, 0.92, 0.16],
-  [1.00, 0.95, 0.96, 0.12],
+  [0.00, 0.07, 0.06, 0.16],
+  [0.15, 0.08, 0.08, 0.25],
+  [0.35, 0.10, 0.18, 0.42],
+  [0.55, 0.10, 0.30, 0.55],
+  [0.75, 0.20, 0.60, 0.72],
+  [0.90, 0.45, 0.82, 0.88],
+  [1.00, 0.88, 0.96, 1.00],
 ];
 
 function colorAt(t) {{
@@ -337,11 +263,10 @@ const renderer = new THREE.WebGLRenderer({{ antialias:true }});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.3;
+renderer.toneMappingExposure = 1.1;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-/* CSS2D for labels */
 const labelR = new CSS2DRenderer();
 labelR.setSize(window.innerWidth, window.innerHeight);
 labelR.domElement.style.position = 'absolute';
@@ -354,110 +279,82 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 
 /* ═══════════════════ CAMERA ═══════════════════ */
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 400);
-camera.position.set(8, 6, TD + 5);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(9, 6, TD + 6);
 
 /* ═══════════════════ CONTROLS ═══════════════════ */
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.06;
-controls.minDistance = 4;
+controls.dampingFactor = 0.05;
+controls.minDistance = 5;
 controls.maxDistance = 35;
-controls.maxPolarAngle = Math.PI * 0.46;
-controls.target.set(0, 0.5, TD * 0.4);
+controls.maxPolarAngle = Math.PI * 0.45;
+controls.target.set(0, 0.3, TD * 0.4);
 controls.autoRotate = true;
-controls.autoRotateSpeed = 0.2;
+controls.autoRotateSpeed = 0.15;
 
 /* ═══════════════════ HELPERS ═══════════════════ */
 function mkLabel(text, size, color, bold) {{
   const d = document.createElement('div');
   d.textContent = text;
-  d.style.cssText = `color:${{color}};font-family:Consolas,Menlo,monospace;font-size:${{size}}px;${{bold?'font-weight:600;':''}}white-space:nowrap;pointer-events:none;text-shadow:0 0 8px rgba(0,0,0,0.9);`;
+  d.style.cssText = `color:${{color}};font-family:'Inter','Helvetica Neue',sans-serif;font-size:${{size}}px;${{bold?'font-weight:600;':''}}white-space:nowrap;pointer-events:none;`;
   return new CSS2DObject(d);
 }}
 
 function xWorld(binIdx) {{ return -SW/2 + (binIdx/NB) * SW; }}
 
-const axisMat = new THREE.LineBasicMaterial({{ color:0x3a5570, transparent:true, opacity:0.8 }});
-const tickMat = new THREE.LineBasicMaterial({{ color:0x3a5570, transparent:true, opacity:0.6 }});
-const guideMat = new THREE.LineBasicMaterial({{ color:0x1e2e40, transparent:true, opacity:0.2 }});
+/* ═══════════════════ MINIMAL AXES ═══════════════════ */
+const axisMat = new THREE.LineBasicMaterial({{ color:0x2a3545, transparent:true, opacity:0.5 }});
+const tickMat = new THREE.LineBasicMaterial({{ color:0x2a3545, transparent:true, opacity:0.35 }});
 
 function addLine(pts, mat) {{
   const g = new THREE.BufferGeometry().setFromPoints(pts);
   scene.add(new THREE.Line(g, mat));
 }}
 
-/* ═══════════════════ 3D AXES ═══════════════════ */
-// X axis (Price)
-addLine([new THREE.Vector3(-SW/2, 0, -0.4), new THREE.Vector3(SW/2, 0, -0.4)], axisMat);
-const xT = mkLabel('Price (USDT)', 11, '#6090b0', true);
-xT.position.set(0, -0.15, -0.8);
+// X axis — thin line, sparse ticks
+addLine([new THREE.Vector3(-SW/2, 0, -0.3), new THREE.Vector3(SW/2, 0, -0.3)], axisMat);
+const xT = mkLabel('Price (USDT)', 9, 'rgba(100,130,160,0.4)', false);
+xT.position.set(0, -0.15, -0.7);
 scene.add(xT);
 
-// X ticks
 D.price_labels.forEach(pl => {{
   const x = xWorld(pl.idx);
-  addLine([new THREE.Vector3(x, 0, -0.4), new THREE.Vector3(x, -0.12, -0.4)], tickMat);
-  // Vertical guide line from tick up
-  addLine([new THREE.Vector3(x, 0, -0.4), new THREE.Vector3(x, 0, TD+0.3)], guideMat);
-  const lb = mkLabel(pl.val.toLocaleString(), 8, '#6090b0', false);
-  lb.position.set(x, -0.3, -0.4);
+  addLine([new THREE.Vector3(x, 0, -0.3), new THREE.Vector3(x, -0.08, -0.3)], tickMat);
+  const lb = mkLabel(pl.val.toLocaleString(), 7, 'rgba(100,130,160,0.35)', false);
+  lb.position.set(x, -0.22, -0.3);
   scene.add(lb);
 }});
 
-// Y axis (Volume)
-const yH = HY * 1.15;
-addLine([new THREE.Vector3(-SW/2-0.4, 0, -0.4), new THREE.Vector3(-SW/2-0.4, yH, -0.4)], axisMat);
-const yT = mkLabel('Volume', 11, '#6090b0', true);
-yT.position.set(-SW/2-0.7, yH*0.55, -0.4);
+// Y axis — minimal
+const yH = HY * 1.1;
+addLine([new THREE.Vector3(-SW/2-0.3, 0, -0.3), new THREE.Vector3(-SW/2-0.3, yH, -0.3)], axisMat);
+const yT = mkLabel('Volume', 9, 'rgba(100,130,160,0.4)', false);
+yT.position.set(-SW/2-0.6, yH*0.55, -0.3);
 scene.add(yT);
 
-for (let i = 0; i <= 5; i++) {{
-  const y = (i/5)*yH;
-  addLine([new THREE.Vector3(-SW/2-0.4, y, -0.4), new THREE.Vector3(-SW/2-0.6, y, -0.4)], tickMat);
-  // Horizontal guide line across floor
-  addLine([new THREE.Vector3(-SW/2, y, -0.4), new THREE.Vector3(SW/2, y, -0.4)], guideMat);
-  const lb = mkLabel(Math.round((i/5)*100)+'%', 8, '#6090b0', false);
-  lb.position.set(-SW/2-0.85, y, -0.4);
+// Only 3 Y ticks
+for (let i = 0; i <= 2; i++) {{
+  const y = (i/2)*yH;
+  addLine([new THREE.Vector3(-SW/2-0.3, y, -0.3), new THREE.Vector3(-SW/2-0.45, y, -0.3)], tickMat);
+  const lb = mkLabel(Math.round((i/2)*100)+'%', 7, 'rgba(100,130,160,0.3)', false);
+  lb.position.set(-SW/2-0.7, y, -0.3);
   scene.add(lb);
 }}
 
-// Z axis (Exchange)
-addLine([new THREE.Vector3(-SW/2-0.4, 0, -0.4), new THREE.Vector3(-SW/2-0.4, 0, TD+0.4)], axisMat);
-const zT = mkLabel('Exchange', 11, '#6090b0', true);
-zT.position.set(-SW/2-0.7, -0.15, TD*0.5);
-scene.add(zT);
-
-/* ═══════════════════ BACK WALL GRID ═══════════════════ */
-const backWallMat = new THREE.LineBasicMaterial({{ color:0x1e2e40, transparent:true, opacity:0.18 }});
-// Vertical lines on back wall
-for (let i = 0; i <= 10; i++) {{
-  const x = -SW/2 + (i/10)*SW;
-  addLine([new THREE.Vector3(x, 0, -0.4), new THREE.Vector3(x, yH, -0.4)], backWallMat);
-}}
-// Horizontal lines on back wall
-for (let i = 0; i <= 5; i++) {{
-  const y = (i/5)*yH;
-  addLine([new THREE.Vector3(-SW/2, y, -0.4), new THREE.Vector3(SW/2, y, -0.4)], backWallMat);
-}}
-// Side wall grid (left)
-for (let i = 0; i <= 5; i++) {{
-  const y = (i/5)*yH;
-  addLine([new THREE.Vector3(-SW/2-0.4, y, -0.4), new THREE.Vector3(-SW/2-0.4, y, TD+0.4)], backWallMat);
-}}
+// Z axis
+addLine([new THREE.Vector3(-SW/2-0.3, 0, -0.3), new THREE.Vector3(-SW/2-0.3, 0, TD+0.3)], axisMat);
 
 /* ═══════════════════ EXCHANGE COLORS ═══════════════════ */
-const EXC = {{ Binance:'#f0b90b', Coinbase:'#0052ff', Kraken:'#7b3fe4' }};
+const EXC = {{ Binance:'rgba(200,180,120,0.5)', Coinbase:'rgba(100,140,200,0.5)', Kraken:'rgba(150,120,200,0.5)' }};
 
 /* ═══════════════════ PER-EXCHANGE SURFACES ═══════════════════ */
 const meshes = [];
 
 EX.forEach((ex, ei) => {{
   const prof = PROF[ex];
-  const slope = SLOPES[ex];
   const zOff = ei * (SD + GAP);
 
-  // ── Solid surface ──
   const geo = new THREE.PlaneGeometry(SW, SD, NB-1, SROWS-1);
   geo.rotateX(-Math.PI/2);
   const pos = geo.attributes.position;
@@ -474,7 +371,6 @@ EX.forEach((ex, ei) => {{
     pos.setY(i, fH * HY);
     pos.setZ(i, pos.getZ(i) + zOff + SD/2);
 
-    // Clean direct color mapping — full brightness
     const col = colorAt(fH);
     cols[i*3] = col.r; cols[i*3+1] = col.g; cols[i*3+2] = col.b;
   }}
@@ -483,7 +379,7 @@ EX.forEach((ex, ei) => {{
   geo.computeVertexNormals();
 
   const mat = new THREE.MeshStandardMaterial({{
-    vertexColors:true, roughness:0.4, metalness:0.05,
+    vertexColors:true, roughness:0.45, metalness:0.08,
     flatShading:false, side:THREE.DoubleSide,
   }});
   const mesh = new THREE.Mesh(geo, mat);
@@ -491,169 +387,53 @@ EX.forEach((ex, ei) => {{
   scene.add(mesh);
   meshes.push(mesh);
 
-  // ── Wireframe overlay ──
-  const wfGeo = geo.clone();
-  const wfMat = new THREE.MeshBasicMaterial({{
-    wireframe:true, color:0x2a4060, transparent:true, opacity:0.06,
-  }});
-  scene.add(new THREE.Mesh(wfGeo, wfMat));
-
-  // ── Exchange label ──
-  const exLbl = mkLabel(ex, 13, EXC[ex]||'#88aacc', true);
-  exLbl.position.set(-SW/2-0.7, 0.12, zOff+SD/2);
+  // Exchange label — subtle
+  const exLbl = mkLabel(ex, 10, EXC[ex]||'rgba(140,160,180,0.5)', true);
+  exLbl.position.set(-SW/2-0.5, 0.08, zOff+SD/2);
   scene.add(exLbl);
-  addLine([new THREE.Vector3(-SW/2-0.4, 0, zOff+SD/2), new THREE.Vector3(-SW/2-0.55, 0, zOff+SD/2)], tickMat);
 }});
 
-/* ═══════════════════ FLOOR CONTOUR LINES ═══════════════════ */
-const contourColors = [0x1a3050, 0x2a4870, 0x306090, 0x4088a8, 0x50b0c8];
-
-EX.forEach((ex, ei) => {{
-  const zOff = ei * (SD + GAP);
-  const exContours = CONTOURS[ex];
-
-  exContours.forEach((cObj, li) => {{
-    const color = contourColors[li] || 0x2a6888;
-    const cMat = new THREE.LineBasicMaterial({{ color, transparent:true, opacity:0.35 + li*0.08 }});
-
-    cObj.segments.forEach(seg => {{
-      const x0 = xWorld(seg[0]);
-      const x1 = xWorld(seg[1]);
-      const zMid = zOff + SD/2;
-      // Compute z-extent at this contour level using sin taper inversion
-      const level = cObj.level;
-      // For the center of the region, find z width
-      const zHalf = SD/2 * 0.85;  // scale down slightly
-      const pts = [
-        new THREE.Vector3(x0, 0.01, zMid - zHalf * (1-level*0.3)),
-        new THREE.Vector3(x0, 0.01, zMid + zHalf * (1-level*0.3)),
-        new THREE.Vector3(x1, 0.01, zMid + zHalf * (1-level*0.3)),
-        new THREE.Vector3(x1, 0.01, zMid - zHalf * (1-level*0.3)),
-        new THREE.Vector3(x0, 0.01, zMid - zHalf * (1-level*0.3)),
-      ];
-      const g = new THREE.BufferGeometry().setFromPoints(pts);
-      scene.add(new THREE.Line(g, cMat));
-    }});
-  }});
-}});
-
-/* ═══════════════════ LIQUIDITY WALL MARKERS + DROP LINES ═══════════════════ */
-const wallMarkerMat = new THREE.MeshBasicMaterial({{
-  color:0xf0c040,
-}});
-const dropMat = new THREE.LineBasicMaterial({{ color:0xf0c040, transparent:true, opacity:0.2 }});
-const wallLabelData = [];
-
+/* ═══════════════════ WALL MARKERS — only labeled walls ═══════════════════ */
 EX.forEach((ex, ei) => {{
   const zOff = ei * (SD + GAP);
   const zMid = zOff + SD/2;
 
   (WALLS[ex] || []).forEach(w => {{
+    if (!w.show_label) return;
     const x = xWorld(w.idx);
     const y = w.height * HY;
 
-    // Marker sphere
-    const sGeo = new THREE.IcosahedronGeometry(0.09, 2);
-    const sMesh = new THREE.Mesh(sGeo, wallMarkerMat);
-    sMesh.position.set(x, y, zMid);
-    scene.add(sMesh);
-
-    // Vertical drop line to floor
+    // Thin vertical drop line
+    const dropMat = new THREE.LineBasicMaterial({{ color:0x50c8e8, transparent:true, opacity:0.12 }});
     addLine([new THREE.Vector3(x, y, zMid), new THREE.Vector3(x, 0, zMid)], dropMat);
 
-    // Small floor cross
-    addLine([new THREE.Vector3(x-0.1, 0.01, zMid), new THREE.Vector3(x+0.1, 0.01, zMid)], dropMat);
-    addLine([new THREE.Vector3(x, 0.01, zMid-0.1), new THREE.Vector3(x, 0.01, zMid+0.1)], dropMat);
-
-    // CSS2D wall label
-    const lb = mkLabel('$' + w.price.toLocaleString(), 8, '#d4a830', true);
-    lb.position.set(x, y + 0.18, zMid);
+    // Minimal label
+    const lb = mkLabel('$' + w.price.toLocaleString(), 8, 'rgba(120,210,240,0.6)', true);
+    lb.position.set(x, y + 0.2, zMid);
     scene.add(lb);
   }});
 }});
 
-/* ═══════════════════ BID/ASK LINES ═══════════════════ */
-const bidMat = new THREE.LineBasicMaterial({{ color:0x00cc66, transparent:true, opacity:0.45 }});
-const askMat = new THREE.LineBasicMaterial({{ color:0xff4444, transparent:true, opacity:0.45 }});
-
-EX.forEach((ex, ei) => {{
-  const ba = BID_ASK[ex];
-  if (!ba) return;
-  const zOff = ei * (SD + GAP);
-
-  const bidX = xWorld(ba.bid_idx);
-  addLine([
-    new THREE.Vector3(bidX, 0, zOff),
-    new THREE.Vector3(bidX, HY*0.25, zOff+SD/2),
-    new THREE.Vector3(bidX, 0, zOff+SD),
-  ], bidMat);
-
-  const askX = xWorld(ba.ask_idx);
-  addLine([
-    new THREE.Vector3(askX, 0, zOff),
-    new THREE.Vector3(askX, HY*0.25, zOff+SD/2),
-    new THREE.Vector3(askX, 0, zOff+SD),
-  ], askMat);
-}});
-
-/* ═══════════════════ MID-PRICE REFERENCE PLANE ═══════════════════ */
-const mpX = xWorld(D.mid_idx);
-const mpGeo = new THREE.PlaneGeometry(0.01, yH);
-mpGeo.rotateY(0);
-// Build a thin vertical strip spanning the full Z range
-const mpVerts = new Float32Array([
-  mpX, 0, -0.3,  mpX, yH, -0.3,  mpX, yH, TD+0.3,
-  mpX, 0, -0.3,  mpX, yH, TD+0.3, mpX, 0, TD+0.3,
-]);
-const mpBufGeo = new THREE.BufferGeometry();
-mpBufGeo.setAttribute('position', new THREE.BufferAttribute(mpVerts, 3));
-const mpMat = new THREE.MeshBasicMaterial({{
-  color:0x60c8ff, transparent:true, opacity:0.06, side:THREE.DoubleSide,
-  depthWrite:false,
-}});
-scene.add(new THREE.Mesh(mpBufGeo, mpMat));
-
-// Mid-price line on floor
-addLine([
-  new THREE.Vector3(mpX, 0.01, -0.4),
-  new THREE.Vector3(mpX, 0.01, TD+0.4),
-], new THREE.LineBasicMaterial({{ color:0x60c8ff, transparent:true, opacity:0.2 }}));
-
-const mpLbl = mkLabel('Mid $' + D.mid_price.toLocaleString(), 9, 'rgba(100,200,255,0.7)', true);
-mpLbl.position.set(mpX, -0.18, -0.4);
-scene.add(mpLbl);
-
-/* ═══════════════════ FLOOR ═══════════════════ */
-const floorGrid = new THREE.GridHelper(18, 28, 0x2a3a50, 0x1a2838);
-floorGrid.position.set(0, -0.01, TD*0.4);
-floorGrid.material.transparent = true;
-floorGrid.material.opacity = 0.3;
-scene.add(floorGrid);
-
-const floorGeo = new THREE.PlaneGeometry(SW*1.3, TD*1.5);
+/* ═══════════════════ FLOOR — subtle ground plane only ═══════════════════ */
+const floorGeo = new THREE.PlaneGeometry(SW*1.4, TD*1.6);
 floorGeo.rotateX(-Math.PI/2);
 const floorMat = new THREE.MeshStandardMaterial({{
-  color:BG, roughness:0.7, metalness:0.1, transparent:true, opacity:0.15,
+  color:0x08090c, roughness:0.9, metalness:0.0, transparent:true, opacity:0.3,
 }});
 const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-floorMesh.position.set(0, -0.03, TD*0.4);
-floorMesh.receiveShadow = true;
+floorMesh.position.set(0, -0.02, TD*0.4);
 scene.add(floorMesh);
 
-/* ═══════════════════ LIGHTING (neutral, well-lit) ═══════════════════ */
-scene.add(new THREE.AmbientLight(0x404860, 1.0));
+/* ═══════════════════ LIGHTING — clean, soft ═══════════════════ */
+scene.add(new THREE.AmbientLight(0x303848, 0.8));
 
-const keyL = new THREE.DirectionalLight(0xeef0ff, 1.2);
-keyL.position.set(8, 14, 8);
+const keyL = new THREE.DirectionalLight(0xd0e0f0, 1.0);
+keyL.position.set(6, 12, 6);
 scene.add(keyL);
 
-const fillL = new THREE.DirectionalLight(0x8090b0, 0.6);
-fillL.position.set(-8, 10, -4);
+const fillL = new THREE.DirectionalLight(0x607090, 0.4);
+fillL.position.set(-6, 8, -3);
 scene.add(fillL);
-
-const backL = new THREE.DirectionalLight(0x6070a0, 0.3);
-backL.position.set(0, 6, -12);
-scene.add(backL);
 
 /* ═══════════════════ TOOLTIP ═══════════════════ */
 const ray = new THREE.Raycaster();
@@ -669,18 +449,13 @@ renderer.domElement.addEventListener('mousemove', (e) => {{
   if (hits.length > 0) {{
     const hit = hits[0];
     const ex = hit.object.userData.exchange;
-    const prof = hit.object.userData.profile;
     const pt = hit.point;
 
     const priceT = (pt.x + SW/2) / SW;
     const price = D.price_range[0] + priceT * (D.price_range[1] - D.price_range[0]);
     const binIdx = Math.round(priceT * NB);
     const volPct = Math.max(0, (pt.y / HY) * 100);
-    const imb = D.avg_imbalances[ex] || 0;
-    const imbStr = (imb >= 0 ? '+' : '') + (imb * 100).toFixed(2) + '%';
-    const imbColor = imb >= 0 ? '#00cc66' : '#ff4455';
 
-    // Check if near a wall
     let wallNote = '';
     const exWalls = WALLS[ex] || [];
     for (const w of exWalls) {{
@@ -690,21 +465,12 @@ renderer.domElement.addEventListener('mousemove', (e) => {{
       }}
     }}
 
-    // Approximate bid/ask volume from profile shape
-    const ba = BID_ASK[ex];
-    const midBin = D.mid_idx;
-    const isBid = binIdx < midBin;
-    const sideLabel = isBid ? 'Bid Side' : 'Ask Side';
-    const sideColor = isBid ? '#00cc66' : '#ff4455';
-
     tip.style.display = 'block';
     tip.style.left = (e.clientX+18)+'px';
     tip.style.top = (e.clientY-12)+'px';
     tip.innerHTML = `<div class="t-label">Exchange</div><div class="t-val">${{ex}}</div>`
       + `<div class="t-row"><div class="t-label">Price</div><div class="t-val">${{price.toLocaleString(undefined,{{minimumFractionDigits:2,maximumFractionDigits:2}})}} USDT</div></div>`
       + `<div class="t-row"><div class="t-label">Relative Volume</div><div class="t-val">${{volPct.toFixed(1)}}%</div></div>`
-      + `<div class="t-row"><div class="t-label">Side</div><div class="t-val" style="color:${{sideColor}}">${{sideLabel}}</div></div>`
-      + `<div class="t-row"><div class="t-label">Avg Imbalance</div><div class="t-val" style="color:${{imbColor}}">${{imbStr}}</div></div>`
       + wallNote;
   }} else {{
     tip.style.display = 'none';
@@ -745,11 +511,11 @@ def _build_dashboard_html(payload_json: str, spark_json: str, data: dict) -> str
         imb = imbalance.get(ex, [0])
         last_imb = imb[-1] if imb else 0
         avg_imb = float(np.mean(imb)) if imb else 0
-        imb_color = "#00cc66" if last_imb > 0 else "#ff4455"
-        ex_color = '#f0b90b' if ex == 'Binance' else '#0052ff' if ex == 'Coinbase' else '#7b3fe4'
+        imb_color = "#5aaa7a" if last_imb > 0 else "#aa5a6a"
+        ex_color = '#b0a070' if ex == 'Binance' else '#6080b0' if ex == 'Coinbase' else '#8070a0'
         stat_rows += f"""
         <tr>
-          <td style="color:{ex_color};font-weight:600">{ex}</td>
+          <td style="color:{ex_color};font-weight:500">{ex}</td>
           <td style="color:{imb_color}">{last_imb:+.4f}</td>
           <td>{avg_imb:+.4f}</td>
         </tr>"""
@@ -758,38 +524,38 @@ def _build_dashboard_html(payload_json: str, spark_json: str, data: dict) -> str
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Liquidity Dashboard — BTC/USDT</title>
+<title>Liquidity Dashboard</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ background:#05070a; color:#b0c4d4; font-family:'Consolas','Menlo',monospace; }}
+  body {{ background:#06070a; color:#7a8a98; font-family:'Inter','Helvetica Neue',sans-serif; }}
   .header {{
-    padding:16px 24px; border-bottom:1px solid #141e30;
+    padding:16px 24px; border-bottom:1px solid rgba(40,50,60,0.3);
     display:flex; justify-content:space-between; align-items:center;
   }}
-  .header h1 {{ color:#d0e0f0; font-size:15px; font-weight:600; letter-spacing:0.4px; }}
-  .header .meta {{ font-size:10px; color:#5a7a90; }}
+  .header h1 {{ color:#90a0b0; font-size:13px; font-weight:500; letter-spacing:0.5px; }}
+  .header .meta {{ font-size:10px; color:rgba(100,120,140,0.4); }}
   .panels {{ display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr auto; height:calc(100vh - 52px); }}
-  .panel {{ border:1px solid #141e30; position:relative; overflow:hidden; }}
+  .panel {{ border:1px solid rgba(40,50,60,0.2); position:relative; overflow:hidden; }}
   .panel-title {{
-    position:absolute; top:8px; left:12px; font-size:9px;
-    color:#4a7090; text-transform:uppercase; letter-spacing:1px; z-index:10;
+    position:absolute; top:10px; left:14px; font-size:9px;
+    color:rgba(100,120,140,0.35); text-transform:uppercase; letter-spacing:1.2px; z-index:10;
   }}
-  .panel-3d {{ grid-column:1/-1; min-height:58vh; }}
+  .panel-3d {{ grid-column:1/-1; min-height:60vh; }}
   .panel-3d iframe {{ width:100%; height:100%; border:none; display:block; }}
   table {{ width:100%; border-collapse:collapse; font-size:11px; }}
-  th {{ text-align:left; color:#4a7090; font-weight:400; padding:6px 10px;
-       text-transform:uppercase; font-size:9px; letter-spacing:0.5px;
-       border-bottom:1px solid #141e30; }}
-  td {{ padding:6px 10px; border-bottom:1px solid #0c1420; }}
-  .spark-panel {{ padding:14px; }}
-  .spark-row {{ display:flex; align-items:center; margin-bottom:8px; gap:10px; }}
-  .spark-label {{ width:72px; font-size:10px; font-weight:600; }}
+  th {{ text-align:left; color:rgba(100,120,140,0.35); font-weight:400; padding:8px 12px;
+       text-transform:uppercase; font-size:8px; letter-spacing:0.8px;
+       border-bottom:1px solid rgba(40,50,60,0.2); }}
+  td {{ padding:8px 12px; border-bottom:1px solid rgba(30,40,50,0.15); }}
+  .spark-panel {{ padding:16px; }}
+  .spark-row {{ display:flex; align-items:center; margin-bottom:10px; gap:12px; }}
+  .spark-label {{ width:72px; font-size:10px; font-weight:500; }}
   .spark-canvas {{ flex:1; height:26px; }}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>Cross-Exchange Liquidity Dashboard — BTC/USDT</h1>
+  <h1>Cross-Exchange Liquidity Dashboard</h1>
   <div class="meta">{n_samples} snapshots &middot; {round(price_min,2)} — {round(price_max,2)} USDT</div>
 </div>
 <div class="panels">
@@ -797,21 +563,21 @@ def _build_dashboard_html(payload_json: str, spark_json: str, data: dict) -> str
     <div class="panel-title">3D Liquidity Surface</div>
     <iframe src="3d_liquidity_pro.html"></iframe>
   </div>
-  <div class="panel" style="padding:14px;">
+  <div class="panel" style="padding:16px;">
     <div class="panel-title">Exchange Metrics</div>
-    <table style="margin-top:24px;">
+    <table style="margin-top:28px;">
       <tr><th>Exchange</th><th>Last Imbalance</th><th>Avg Imbalance</th></tr>
       {stat_rows}
     </table>
   </div>
   <div class="panel spark-panel">
     <div class="panel-title">Imbalance Over Time</div>
-    <div id="sparklines" style="margin-top:24px;"></div>
+    <div id="sparklines" style="margin-top:28px;"></div>
   </div>
 </div>
 <script>
 const sparkData = {spark_json};
-const exColors = {{ Binance:'#f0b90b', Coinbase:'#0052ff', Kraken:'#7b3fe4' }};
+const exColors = {{ Binance:'#b0a070', Coinbase:'#6080b0', Kraken:'#8070a0' }};
 const ctr = document.getElementById('sparklines');
 
 Object.entries(sparkData).forEach(([ex, vals]) => {{
@@ -819,7 +585,7 @@ Object.entries(sparkData).forEach(([ex, vals]) => {{
   row.className = 'spark-row';
   const lbl = document.createElement('div');
   lbl.className = 'spark-label';
-  lbl.style.color = exColors[ex]||'#88aacc';
+  lbl.style.color = exColors[ex]||'#7a8a98';
   lbl.textContent = ex;
   const cvs = document.createElement('canvas');
   cvs.className = 'spark-canvas';
@@ -835,11 +601,11 @@ Object.entries(sparkData).forEach(([ex, vals]) => {{
     const rng = mx-mn||1; const pad = 4;
 
     const zy = h-pad-((0-mn)/rng)*(h-pad*2);
-    ctx.strokeStyle = 'rgba(50,70,90,0.3)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(50,60,70,0.2)'; ctx.lineWidth = 1;
     ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(0,zy); ctx.lineTo(w,zy); ctx.stroke();
     ctx.setLineDash([]);
 
-    ctx.strokeStyle = exColors[ex]||'#88aacc'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.strokeStyle = exColors[ex]||'#7a8a98'; ctx.lineWidth = 1.5; ctx.beginPath();
     vals.forEach((v,i) => {{
       const x = (i/(vals.length-1))*w;
       const y = h-pad-((v-mn)/rng)*(h-pad*2);

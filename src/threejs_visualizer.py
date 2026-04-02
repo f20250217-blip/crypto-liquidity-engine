@@ -239,17 +239,17 @@ def _build_3d_html(payload_json: str) -> str:
   #tooltip .t-wall {{ color:#f0c040; font-size:9px; margin-top:4px; }}
 
   #legend {{
-    position:fixed; bottom:16px; right:16px; z-index:90;
-    background:rgba(6,10,18,0.88); border:1px solid rgba(40,60,90,0.4);
-    padding:12px 16px; border-radius:6px; font-size:10px;
-    backdrop-filter:blur(8px); color:#7a9ab0; min-width:140px;
+    position:fixed; bottom:10px; right:10px; z-index:90;
+    background:rgba(8,12,20,0.85); border:1px solid rgba(40,60,90,0.3);
+    padding:8px 12px; border-radius:4px; font-size:9px;
+    backdrop-filter:blur(6px); color:#7a9ab0;
   }}
-  #legend .l-title {{ font-size:11px; color:#a0c0d8; font-weight:600; margin-bottom:8px; }}
-  #legend .l-row {{ display:flex; align-items:center; gap:8px; margin:3px 0; }}
-  #legend .l-swatch {{ width:14px; height:3px; border-radius:1px; }}
-  .l-section {{ margin-top:8px; padding-top:6px; border-top:1px solid rgba(40,60,90,0.3); }}
-  .l-section-title {{ font-size:9px; color:#5a7a90; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }}
-  #legend .l-axis {{ display:flex; align-items:center; gap:6px; margin:2px 0; font-size:9px; }}
+  #legend .l-title {{ font-size:10px; color:#a0c0d8; font-weight:600; margin-bottom:5px; }}
+  #legend .l-row {{ display:flex; align-items:center; gap:6px; margin:2px 0; }}
+  #legend .l-swatch {{ width:12px; height:2px; border-radius:1px; }}
+  .l-section {{ margin-top:5px; padding-top:4px; border-top:1px solid rgba(40,60,90,0.25); }}
+  .l-section-title {{ font-size:8px; color:#5a7a90; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px; }}
+  #legend .l-axis {{ display:flex; align-items:center; gap:5px; margin:1px 0; font-size:8px; }}
 </style>
 </head>
 <body>
@@ -354,17 +354,17 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 
 /* ═══════════════════ CAMERA ═══════════════════ */
-const camera = new THREE.PerspectiveCamera(40, window.innerWidth/window.innerHeight, 0.1, 400);
-camera.position.set(11, 8, TD + 10);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(8, 6, TD + 5);
 
 /* ═══════════════════ CONTROLS ═══════════════════ */
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.minDistance = 5;
-controls.maxDistance = 50;
+controls.minDistance = 4;
+controls.maxDistance = 35;
 controls.maxPolarAngle = Math.PI * 0.46;
-controls.target.set(0, 0.6, TD * 0.4);
+controls.target.set(0, 0.5, TD * 0.4);
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.2;
 
@@ -391,7 +391,7 @@ function addLine(pts, mat) {{
 // X axis (Price)
 addLine([new THREE.Vector3(-SW/2, 0, -0.4), new THREE.Vector3(SW/2, 0, -0.4)], axisMat);
 const xT = mkLabel('Price (USDT)', 11, '#6090b0', true);
-xT.position.set(0, -0.2, -1.2);
+xT.position.set(0, -0.15, -0.8);
 scene.add(xT);
 
 // X ticks
@@ -409,7 +409,7 @@ D.price_labels.forEach(pl => {{
 const yH = HY * 1.15;
 addLine([new THREE.Vector3(-SW/2-0.4, 0, -0.4), new THREE.Vector3(-SW/2-0.4, yH, -0.4)], axisMat);
 const yT = mkLabel('Volume', 11, '#6090b0', true);
-yT.position.set(-SW/2-1.0, yH*0.55, -0.4);
+yT.position.set(-SW/2-0.7, yH*0.55, -0.4);
 scene.add(yT);
 
 for (let i = 0; i <= 5; i++) {{
@@ -425,7 +425,7 @@ for (let i = 0; i <= 5; i++) {{
 // Z axis (Exchange)
 addLine([new THREE.Vector3(-SW/2-0.4, 0, -0.4), new THREE.Vector3(-SW/2-0.4, 0, TD+0.4)], axisMat);
 const zT = mkLabel('Exchange', 11, '#6090b0', true);
-zT.position.set(-SW/2-1.0, -0.2, TD*0.5);
+zT.position.set(-SW/2-0.7, -0.15, TD*0.5);
 scene.add(zT);
 
 /* ═══════════════════ BACK WALL GRID ═══════════════════ */
@@ -624,13 +624,13 @@ mpLbl.position.set(mpX, -0.18, -0.4);
 scene.add(mpLbl);
 
 /* ═══════════════════ FLOOR ═══════════════════ */
-const floorGrid = new THREE.GridHelper(24, 36, 0x2a3a50, 0x1a2838);
+const floorGrid = new THREE.GridHelper(18, 28, 0x2a3a50, 0x1a2838);
 floorGrid.position.set(0, -0.01, TD*0.4);
 floorGrid.material.transparent = true;
 floorGrid.material.opacity = 0.3;
 scene.add(floorGrid);
 
-const floorGeo = new THREE.PlaneGeometry(SW*1.8, TD*1.8);
+const floorGeo = new THREE.PlaneGeometry(SW*1.3, TD*1.5);
 floorGeo.rotateX(-Math.PI/2);
 const floorMat = new THREE.MeshStandardMaterial({{
   color:BG, roughness:0.7, metalness:0.1, transparent:true, opacity:0.15,

@@ -2,6 +2,12 @@
 
 > Comparing order book depth, spread, and flow imbalance across major crypto exchanges
 
+## 3D Liquidity Visualization
+
+![3D Preview](output/3d_preview.png)
+
+Interactive 3D version available locally: open `output/3d_liquidity_premium.html`
+
 ## Overview
 
 Collects time-series order book data from Binance, Coinbase, and Kraken, then builds an interactive Three.js 3D surface showing how liquidity evolves over time — with vertex-displaced geometry, custom color gradients, and cinematic lighting.

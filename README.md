@@ -20,19 +20,20 @@ The 3D surface maps **order book liquidity** across three dimensions:
 
 ## How to Read the Visualization
 
-**Liquidity walls** — Sharp vertical peaks at price levels with concentrated resting orders. Yellow-tipped peaks mark the strongest walls. Vertical drop lines connect peaks to the floor grid for precise price identification.
+**Liquidity ridges** — Continuous elevated bands at price zones with concentrated resting orders. The pipeline detects contiguous high-volume regions, merges nearby peaks into ridges, and keeps only the top 2 dominant structures per exchange. Yellow-tipped peaks mark the strongest walls with vertical drop lines.
 
-**Cross-exchange comparison** — Separated flat-shaded strips let you compare depth structure across exchanges. Matching peaks signal consensus support/resistance.
+**Cross-exchange comparison** — Separated strips let you compare ridge structure across exchanges. Matching ridges signal consensus support/resistance.
 
-**Heatmap** — Dark blue-gray (low) through blue and cyan (high) to soft yellow (extreme concentration).
+**Heatmap** — Dark base through blue and cyan (high) to soft yellow (extreme concentration).
 
 ## Features
 
 - Time-series order book collection (configurable sample count and interval)
-- 200-bin smooth depth profiles with noise removal (top 35% signal)
-- Smooth-shaded surfaces with natural curves
-- Automated liquidity wall detection — top 3 peaks labeled with drop lines
-- Professional heatmap: #1E2A38 → #2F6FA3 → #4FD1C5 → #F6E05E
+- Ridge-based structure extraction (not raw peak detection)
+- Automatic dead-edge cropping to active price region
+- Contiguous liquidity band detection via scipy.ndimage.label
+- Top 2 ridges per exchange with nearby-region merging
+- Top 3 peak labels with vertical drop lines
 - Hover tooltips: exchange, price, volume, wall detection
 - Multi-panel dashboard with imbalance sparklines
 

@@ -9,28 +9,32 @@ Generates:
 import os
 import json
 import numpy as np
-from scipy.ndimage import gaussian_filter, median_filter
+from scipy.ndimage import gaussian_filter, median_filter, label
 from scipy.signal import find_peaks
 
 
 # ---------------------------------------------------------------------------
-# Data preparation
+# Data preparation — ridge-based structure extraction
 # ---------------------------------------------------------------------------
 
 def _build_exchange_profiles(data: dict, n_bins: int = 200) -> dict:
     """
-    Build per-exchange depth profiles.
+    Build per-exchange depth profiles with intentional ridge structures.
 
-    Pipeline: average → log-compress → denoise → resample → smooth →
-              threshold → normalize. Keeps 6-10 meaningful peaks.
+    Pipeline:
+      1. Average across time, log-compress, denoise
+      2. Resample to n_bins
+      3. Detect liquidity bands (contiguous high-volume zones)
+      4. Merge nearby peaks into continuous ridges
+      5. Keep only top 2 dominant ridges per exchange
+      6. Sharpen ridge edges
+      7. Crop to active price region (remove dead edges)
     """
     price_grids = data["price_grids"]
     exchanges = data["exchanges"]
     price_min, price_max = data["price_range"]
-    price_ticks = np.linspace(price_min, price_max, n_bins)
     imbalance_series = data.get("imbalance_series", {})
 
-    profiles = {}
     raw_profiles = {}
     global_max = 0.0
 
@@ -43,48 +47,132 @@ def _build_exchange_profiles(data: dict, n_bins: int = 200) -> dict:
         x_orig = np.linspace(0, 1, len(raw))
         x_new = np.linspace(0, 1, n_bins)
         resampled = np.interp(x_new, x_orig, raw)
-        resampled = gaussian_filter(resampled, sigma=2.0)
+        resampled = gaussian_filter(resampled, sigma=1.5)
 
         raw_profiles[ex] = resampled.copy()
         global_max = max(global_max, resampled.max())
 
+    # ── Normalize globally ──
     for ex in exchanges:
-        p = raw_profiles[ex]
         if global_max > 0:
-            p = p / global_max
+            raw_profiles[ex] = raw_profiles[ex] / global_max
 
-        # Moderate threshold — keep top ~35% of signal for 6-10 peaks
-        p65 = np.percentile(p, 65)
-        p = np.clip((p - p65) / (1.0 - p65 + 1e-9), 0, 1)
+    # ── Find active region across all exchanges (crop dead edges) ──
+    activity = np.zeros(n_bins)
+    for ex in exchanges:
+        activity += raw_profiles[ex]
+    activity_thresh = np.percentile(activity, 40)
+    active_mask = activity > activity_thresh
+    active_indices = np.where(active_mask)[0]
 
-        p = np.power(p, 0.55)
-        p = gaussian_filter(p, sigma=1.5)
+    if len(active_indices) > 10:
+        crop_start = max(0, active_indices[0] - 8)
+        crop_end = min(n_bins, active_indices[-1] + 9)
+    else:
+        crop_start = 0
+        crop_end = n_bins
 
-        pmax = p.max()
+    crop_bins = crop_end - crop_start
+    price_ticks = np.linspace(price_min, price_max, n_bins)
+    cropped_ticks = price_ticks[crop_start:crop_end]
+
+    # ── Ridge extraction per exchange ──
+    profiles = {}
+    for ex in exchanges:
+        p = raw_profiles[ex][crop_start:crop_end].copy()
+
+        # Threshold to find significant regions
+        p50 = np.percentile(p, 55)
+        mask = p > p50
+
+        # Label contiguous regions (bands)
+        labeled, n_regions = label(mask)
+
+        # Score each region by total volume
+        region_scores = []
+        for r in range(1, n_regions + 1):
+            region_mask = labeled == r
+            region_vol = p[region_mask].sum()
+            region_peak = p[region_mask].max()
+            region_center = np.mean(np.where(region_mask)[0])
+            region_width = np.sum(region_mask)
+            region_scores.append({
+                "id": r,
+                "vol": region_vol,
+                "peak": region_peak,
+                "center": region_center,
+                "width": region_width,
+                "mask": region_mask,
+            })
+
+        # Keep top 2 ridges by volume (merge if within 15 bins)
+        region_scores.sort(key=lambda r: r["vol"], reverse=True)
+        kept = region_scores[:3]
+
+        # Merge nearby ridges
+        if len(kept) >= 2:
+            merged = [kept[0]]
+            for r in kept[1:]:
+                can_merge = False
+                for m in merged:
+                    if abs(r["center"] - m["center"]) < crop_bins * 0.12:
+                        m["mask"] = m["mask"] | r["mask"]
+                        m["vol"] += r["vol"]
+                        can_merge = True
+                        break
+                if not can_merge:
+                    merged.append(r)
+            kept = merged[:2]
+
+        # Build ridge profile: zero out everything not in kept ridges
+        ridge_mask = np.zeros(crop_bins, dtype=bool)
+        for r in kept:
+            # Expand ridge slightly for smooth transitions
+            expanded = np.copy(r["mask"])
+            for _ in range(4):
+                shifted_l = np.roll(expanded, 1)
+                shifted_r = np.roll(expanded, -1)
+                expanded = expanded | shifted_l | shifted_r
+            ridge_mask = ridge_mask | expanded
+
+        p_out = np.zeros(crop_bins)
+        p_out[ridge_mask] = p[ridge_mask]
+
+        # Smooth ridge edges (not the interior)
+        p_out = gaussian_filter(p_out, sigma=1.8)
+
+        # Renormalize
+        pmax = p_out.max()
         if pmax > 0:
-            p = p / pmax
+            p_out = p_out / pmax
 
-        profiles[ex] = p
+        # Apply contrast curve — push lows down, keep highs
+        p_out = np.power(p_out, 0.7)
 
-    # ── Detect peaks ──
+        # Kill residual noise below 5%
+        p_out[p_out < 0.05] = 0
+
+        profiles[ex] = p_out
+
+    # ── Detect labeled peaks (top of each ridge) ──
     walls = {}
     all_walls = []
     for ex in exchanges:
         p = profiles[ex]
-        peak_idxs, _ = find_peaks(p, height=0.3, distance=n_bins // 12, prominence=0.1)
+        peak_idxs, _ = find_peaks(p, height=0.25, distance=crop_bins // 10, prominence=0.1)
         wall_list = []
         for idx in peak_idxs:
             wall_list.append({
                 "idx": int(idx),
                 "height": round(float(p[idx]), 3),
-                "price": round(float(price_ticks[idx]), 2),
+                "price": round(float(cropped_ticks[idx]), 2),
                 "exchange": ex,
             })
         wall_list.sort(key=lambda w: w["height"], reverse=True)
-        walls[ex] = wall_list[:5]
-        all_walls.extend(wall_list[:5])
+        walls[ex] = wall_list[:3]
+        all_walls.extend(wall_list[:3])
 
-    # Global top 3 for labels
+    # Top 3 globally for labels
     all_walls.sort(key=lambda w: w["height"], reverse=True)
     top_keys = set()
     for w in all_walls[:3]:
@@ -100,12 +188,12 @@ def _build_exchange_profiles(data: dict, n_bins: int = 200) -> dict:
         imb = imbalance_series.get(ex, [0])
         avg_imbalances[ex] = round(float(np.mean(imb)), 4)
 
-    # ── Price labels — 6 ticks ──
+    # ── Price labels — 6 ticks across cropped range ──
     n_labels = 6
-    step = max(1, n_bins // n_labels)
+    step = max(1, crop_bins // n_labels)
     price_labels = [
-        {"idx": int(i), "val": round(float(price_ticks[i]), 2)}
-        for i in range(0, n_bins, step)
+        {"idx": int(i), "val": round(float(cropped_ticks[i]), 2)}
+        for i in range(0, crop_bins, step)
     ]
 
     profiles_out = {}
@@ -115,10 +203,10 @@ def _build_exchange_profiles(data: dict, n_bins: int = 200) -> dict:
     return {
         "exchanges": exchanges,
         "profiles": profiles_out,
-        "n_bins": n_bins,
+        "n_bins": int(crop_bins),
         "price_labels": price_labels,
-        "price_range": [round(float(price_min), 2), round(float(price_max), 2)],
-        "mid_price": round(float((price_min + price_max) / 2.0), 2),
+        "price_range": [round(float(cropped_ticks[0]), 2), round(float(cropped_ticks[-1]), 2)],
+        "mid_price": round(float((cropped_ticks[0] + cropped_ticks[-1]) / 2.0), 2),
         "walls": walls,
         "avg_imbalances": avg_imbalances,
     }
@@ -186,7 +274,7 @@ def _build_3d_html(payload_json: str) -> str:
 </head>
 <body>
 <div id="tooltip"></div>
-<div id="info">BTC/USDT <span>Order Book Depth</span></div>
+<div id="info">BTC/USDT <span>Liquidity Structure</span></div>
 
 <script type="importmap">
 {{
@@ -208,20 +296,21 @@ const PROF = D.profiles;
 const WALLS = D.walls;
 
 /* ═══════ LAYOUT ═══════ */
-const SW = 15;
+const SW = 14;
 const SD = 3.0;
-const GAP = 1.0;
-const HY = 2.8;
+const GAP = 1.2;
+const HY = 3.0;
 const BG = 0x0F172A;
 const TD = EX.length * SD + (EX.length - 1) * GAP;
-const SROWS = 22;
+const SROWS = 20;
 
-/* ═══════ COLOR: #1E2A38 → #2F6FA3 → #4FD1C5 → #F6E05E ═══════ */
+/* ═══════ COLOR: dark base → blue → cyan → yellow (4 stops) ═══════ */
 const CS = [
-  [0.00, 0.118, 0.165, 0.220],
-  [0.33, 0.184, 0.435, 0.640],
-  [0.66, 0.310, 0.820, 0.773],
-  [1.00, 0.965, 0.878, 0.369],
+  [0.00, 0.06, 0.09, 0.16],
+  [0.25, 0.12, 0.28, 0.48],
+  [0.50, 0.18, 0.55, 0.68],
+  [0.75, 0.31, 0.82, 0.77],
+  [1.00, 0.96, 0.88, 0.37],
 ];
 
 function colorAt(t) {{
@@ -256,9 +345,9 @@ document.body.appendChild(labelR.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
 
-/* ═══════ CAMERA — balanced, ~80% frame fill ═══════ */
+/* ═══════ CAMERA ═══════ */
 const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 400);
-camera.position.set(10, 7, TD + 8);
+camera.position.set(10, 7.5, TD + 8);
 
 /* ═══════ CONTROLS ═══════ */
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -267,7 +356,7 @@ controls.dampingFactor = 0.06;
 controls.minDistance = 6;
 controls.maxDistance = 40;
 controls.maxPolarAngle = Math.PI * 0.44;
-controls.target.set(0, 0.5, TD * 0.42);
+controls.target.set(0, 0.6, TD * 0.42);
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.15;
 
@@ -286,44 +375,41 @@ function addLine(pts, mat) {{
   scene.add(new THREE.Line(g, mat));
 }}
 
-/* ═══════ AXIS MATERIALS — light gray, subtle ═══════ */
-const axisLine = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.25 }});
-const axisTick = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.18 }});
-const gridLine = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.04 }});
+/* ═══════ AXIS MATERIALS ═══════ */
+const axisLine = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.2 }});
+const axisTick = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.14 }});
+const gridLine = new THREE.LineBasicMaterial({{ color: 0x94a3b8, transparent: true, opacity: 0.03 }});
 
 /* ═══════ X AXIS — Price ═══════ */
-addLine([new THREE.Vector3(-SW / 2, 0, -0.15), new THREE.Vector3(SW / 2, 0, -0.15)], axisLine);
-const xTitle = mkLabel('Price (USDT)', 8, 'rgba(148,163,184,0.35)', false);
-xTitle.position.set(0, -0.08, -0.7);
+addLine([new THREE.Vector3(-SW / 2, 0, -0.1), new THREE.Vector3(SW / 2, 0, -0.1)], axisLine);
+const xTitle = mkLabel('Price (USDT)', 8, 'rgba(148,163,184,0.3)', false);
+xTitle.position.set(0, -0.06, -0.6);
 scene.add(xTitle);
 
 D.price_labels.forEach(pl => {{
   const x = xWorld(pl.idx);
-  addLine([new THREE.Vector3(x, 0, -0.15), new THREE.Vector3(x, -0.06, -0.15)], axisTick);
-  addLine([new THREE.Vector3(x, 0.003, -0.15), new THREE.Vector3(x, 0.003, TD + 0.1)], gridLine);
-  const lb = mkLabel(pl.val.toLocaleString(), 7, 'rgba(148,163,184,0.28)', false);
-  lb.position.set(x, -0.18, -0.15);
+  addLine([new THREE.Vector3(x, 0, -0.1), new THREE.Vector3(x, -0.05, -0.1)], axisTick);
+  addLine([new THREE.Vector3(x, 0.002, -0.1), new THREE.Vector3(x, 0.002, TD + 0.05)], gridLine);
+  const lb = mkLabel(pl.val.toLocaleString(), 7, 'rgba(148,163,184,0.22)', false);
+  lb.position.set(x, -0.15, -0.1);
   scene.add(lb);
 }});
 
 /* ═══════ Y AXIS — Volume ═══════ */
 const yH = HY * 1.05;
-addLine([new THREE.Vector3(-SW / 2 - 0.15, 0, -0.15), new THREE.Vector3(-SW / 2 - 0.15, yH, -0.15)], axisLine);
-const yTitle = mkLabel('Volume', 8, 'rgba(148,163,184,0.35)', false);
-yTitle.position.set(-SW / 2 - 0.5, yH * 0.5, -0.15);
+addLine([new THREE.Vector3(-SW / 2 - 0.1, 0, -0.1), new THREE.Vector3(-SW / 2 - 0.1, yH, -0.1)], axisLine);
+const yTitle = mkLabel('Volume', 8, 'rgba(148,163,184,0.3)', false);
+yTitle.position.set(-SW / 2 - 0.45, yH * 0.5, -0.1);
 scene.add(yTitle);
 
 for (let i = 0; i <= 4; i++) {{
   const y = (i / 4) * yH;
-  addLine([new THREE.Vector3(-SW / 2 - 0.15, y, -0.15), new THREE.Vector3(-SW / 2 - 0.25, y, -0.15)], axisTick);
-  addLine([new THREE.Vector3(-SW / 2, y, -0.15), new THREE.Vector3(SW / 2, y, -0.15)], gridLine);
-  const lb = mkLabel(Math.round(i * 25) + '%', 7, 'rgba(148,163,184,0.22)', false);
-  lb.position.set(-SW / 2 - 0.5, y, -0.15);
-  scene.add(lb);
+  addLine([new THREE.Vector3(-SW / 2 - 0.1, y, -0.1), new THREE.Vector3(-SW / 2 - 0.2, y, -0.1)], axisTick);
+  addLine([new THREE.Vector3(-SW / 2, y, -0.1), new THREE.Vector3(SW / 2, y, -0.1)], gridLine);
 }}
 
-/* ═══════ Z AXIS — Exchange ═══════ */
-addLine([new THREE.Vector3(-SW / 2 - 0.15, 0, -0.15), new THREE.Vector3(-SW / 2 - 0.15, 0, TD + 0.15)], axisLine);
+/* ═══════ Z AXIS ═══════ */
+addLine([new THREE.Vector3(-SW / 2 - 0.1, 0, -0.1), new THREE.Vector3(-SW / 2 - 0.1, 0, TD + 0.1)], axisLine);
 
 /* ═══════ PER-EXCHANGE SURFACES ═══════ */
 const meshes = [];
@@ -342,13 +428,17 @@ EX.forEach((ex, ei) => {{
     const r = Math.floor(i / NB);
     const h = prof[c];
     const rT = r / (SROWS - 1);
-    const fade = Math.sin(rT * Math.PI);
+    // Flat-top cross-section: full height in center 70%, steep linear fall at edges
+    const edgeDist = Math.min(rT, 1.0 - rT) * 2.0;
+    const fade = Math.min(edgeDist / 0.3, 1.0);
     const fH = h * fade;
 
     pos.setY(i, fH * HY);
     pos.setZ(i, pos.getZ(i) + zOff + SD / 2);
 
-    const col = colorAt(fH);
+    // High-contrast color: push low values darker
+    const colorT = fH > 0.02 ? Math.pow(fH, 0.8) : 0;
+    const col = colorAt(colorT);
     cols[i * 3] = col.r;
     cols[i * 3 + 1] = col.g;
     cols[i * 3 + 2] = col.b;
@@ -359,7 +449,7 @@ EX.forEach((ex, ei) => {{
 
   const mat = new THREE.MeshStandardMaterial({{
     vertexColors: true,
-    roughness: 0.5,
+    roughness: 0.48,
     metalness: 0.02,
     flatShading: false,
     side: THREE.DoubleSide,
@@ -370,17 +460,17 @@ EX.forEach((ex, ei) => {{
   meshes.push(mesh);
 
   /* ── Exchange label ── */
-  const exLbl = mkLabel(ex, 9, 'rgba(148,163,184,0.4)', true);
-  exLbl.position.set(-SW / 2 - 0.4, 0.04, zOff + SD / 2);
+  const exLbl = mkLabel(ex, 9, 'rgba(148,163,184,0.35)', true);
+  exLbl.position.set(-SW / 2 - 0.35, 0.03, zOff + SD / 2);
   scene.add(exLbl);
   addLine([
-    new THREE.Vector3(-SW / 2 - 0.15, 0, zOff + SD / 2),
-    new THREE.Vector3(-SW / 2 - 0.25, 0, zOff + SD / 2),
+    new THREE.Vector3(-SW / 2 - 0.1, 0, zOff + SD / 2),
+    new THREE.Vector3(-SW / 2 - 0.2, 0, zOff + SD / 2),
   ], axisTick);
 }});
 
-/* ═══════ PEAK LABELS — top 3 only ═══════ */
-const dropMat = new THREE.LineBasicMaterial({{ color: 0xF6E05E, transparent: true, opacity: 0.18 }});
+/* ═══════ PEAK DROP LINES — top 3 labeled ═══════ */
+const dropMat = new THREE.LineBasicMaterial({{ color: 0xF6E05E, transparent: true, opacity: 0.2 }});
 
 EX.forEach((ex, ei) => {{
   const zOff = ei * (SD + GAP);
@@ -391,37 +481,23 @@ EX.forEach((ex, ei) => {{
     const x = xWorld(w.idx);
     const y = w.height * HY;
 
-    // Vertical drop line
     addLine([new THREE.Vector3(x, y, zMid), new THREE.Vector3(x, 0, zMid)], dropMat);
+    addLine([new THREE.Vector3(x - 0.08, 0.002, zMid), new THREE.Vector3(x + 0.08, 0.002, zMid)], dropMat);
 
-    // Small floor tick
-    addLine([new THREE.Vector3(x - 0.1, 0.003, zMid), new THREE.Vector3(x + 0.1, 0.003, zMid)], dropMat);
-
-    // Price label
-    const lb = mkLabel('$' + w.price.toLocaleString(), 8, 'rgba(246,224,94,0.55)', true);
-    lb.position.set(x, y + 0.18, zMid);
+    const lb = mkLabel('$' + w.price.toLocaleString(), 8, 'rgba(246,224,94,0.5)', true);
+    lb.position.set(x, y + 0.16, zMid);
     scene.add(lb);
   }});
 }});
 
-/* ═══════ FLOOR ═══════ */
-const floorGeo = new THREE.PlaneGeometry(SW * 1.2, TD * 1.4);
-floorGeo.rotateX(-Math.PI / 2);
-const floorMat = new THREE.MeshBasicMaterial({{
-  color: BG, transparent: true, opacity: 0.15,
-}});
-const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-floorMesh.position.set(0, -0.01, TD * 0.42);
-scene.add(floorMesh);
-
 /* ═══════ LIGHTING — neutral, even ═══════ */
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+scene.add(new THREE.AmbientLight(0xffffff, 0.65));
 
-const keyL = new THREE.DirectionalLight(0xffffff, 0.9);
+const keyL = new THREE.DirectionalLight(0xffffff, 0.95);
 keyL.position.set(6, 14, 8);
 scene.add(keyL);
 
-const fillL = new THREE.DirectionalLight(0xe2e8f0, 0.45);
+const fillL = new THREE.DirectionalLight(0xe2e8f0, 0.4);
 fillL.position.set(-6, 8, -4);
 scene.add(fillL);
 

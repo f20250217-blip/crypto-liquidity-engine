@@ -20,21 +20,21 @@ The 3D surface maps **order book liquidity** across three dimensions:
 
 ## How to Read the Visualization
 
-**Liquidity walls** — Tall peaks marked with yellow price labels. These are price levels where large volumes of resting orders concentrate. Walls often act as support/resistance because filling them requires significant capital.
+**Liquidity walls** — Sharp vertical peaks at price levels with concentrated resting orders. Yellow-tipped peaks mark the strongest walls. Vertical drop lines connect peaks to the floor grid for precise price identification.
 
-**Cross-exchange comparison** — Separated strips along the Z axis let you compare where each exchange concentrates depth. Matching peaks across exchanges signal consensus-driven support/resistance. Mismatches may indicate arbitrage opportunity or exchange-specific positioning.
+**Cross-exchange comparison** — Separated flat-shaded strips let you compare depth structure across exchanges. Matching peaks signal consensus support/resistance.
 
-**Color gradient** — Maps volume intensity: deep purple (low) through blue and cyan to white (extreme concentration).
+**Heatmap** — Dark blue (low) through cyan (high) to bright yellow (extreme concentration). Flat shading preserves the grid structure for analytical readability.
 
 ## Features
 
 - Time-series order book collection (configurable sample count and interval)
-- 300-bin high-resolution depth profiles per exchange
-- Automated liquidity wall detection via peak finding (prominence + height thresholds)
-- Minimal label system — only strongest walls labeled (max 5 across all exchanges)
-- Clean 3-color gradient: deep purple to blue to cyan/white
-- Hover tooltips: exchange, price, relative volume, wall detection
-- Compact legend panel
+- 120-bin depth profiles with aggressive noise removal (top 25% signal only)
+- Flat-shaded grid surfaces with wireframe overlay
+- Automated liquidity wall detection — only dominant peaks shown
+- Vertical drop lines from peak structures to floor
+- Professional heatmap: dark blue → cyan → yellow
+- Hover tooltips: exchange, price, volume
 - Multi-panel dashboard with imbalance sparklines
 
 ## Metrics
@@ -68,7 +68,7 @@ Configure in `main.py`: `N_SAMPLES` (default 30), `INTERVAL_SEC` (default 10), `
 
 | File | Description |
 |------|-------------|
-| `output/3d_liquidity_pro.html` | Interactive 3D liquidity surface with axes, walls, contours, tooltips |
+| `output/3d_liquidity_pro.html` | Interactive 3D liquidity surface with grid surfaces, axes, walls, tooltips |
 | `output/dashboard.html` | Multi-panel dashboard: 3D view + metrics table + imbalance sparklines |
 
 ## Project Structure

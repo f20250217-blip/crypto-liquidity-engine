@@ -43,8 +43,8 @@ def _prepare_grid(data: dict, grid_cols: int = 140, grid_rows: int = 100) -> dic
     tg, pg = np.meshgrid(t_new, p_new, indexing="ij")
     resampled = interp((tg, pg))
 
-    # Smooth for fluid surface
-    resampled = gaussian_filter(resampled, sigma=1.0)
+    # Two-pass smooth for cinematic fluid surface
+    resampled = gaussian_filter(resampled, sigma=1.8)
 
     # Normalise to [0, 1]
     vmax = resampled.max()
@@ -78,7 +78,7 @@ def _build_html(grid_json: str) -> str:
 <title>3D Liquidity Surface</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ background: #0b0f17; overflow: hidden; }}
+  body {{ background: #060a12; overflow: hidden; }}
   canvas {{ display: block; }}
 </style>
 </head>
@@ -94,6 +94,9 @@ def _build_html(grid_json: str) -> str:
 <script type="module">
 import * as THREE from 'three';
 import {{ OrbitControls }} from 'three/addons/controls/OrbitControls.js';
+import {{ EffectComposer }} from 'three/addons/postprocessing/EffectComposer.js';
+import {{ RenderPass }} from 'three/addons/postprocessing/RenderPass.js';
+import {{ UnrealBloomPass }} from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 /* ── Data ── */
 const grid = {grid_json};
@@ -101,17 +104,18 @@ const ROWS = grid.rows;
 const COLS = grid.cols;
 const H = grid.heights;
 
-/* ── Color stops: purple → blue → cyan → green → yellow ── */
+/* ── Color stops: deep purple → blue → cyan → neon yellow ── */
 const STOPS = [
-  [0.00, 0.10, 0.02, 0.13],
-  [0.15, 0.17, 0.10, 0.41],
-  [0.30, 0.11, 0.23, 0.54],
-  [0.45, 0.05, 0.37, 0.63],
-  [0.58, 0.09, 0.54, 0.72],
-  [0.70, 0.09, 0.69, 0.65],
-  [0.82, 0.50, 0.82, 0.38],
-  [0.92, 0.80, 0.90, 0.24],
-  [1.00, 0.94, 0.91, 0.19],
+  [0.00, 0.06, 0.01, 0.12],
+  [0.12, 0.10, 0.04, 0.28],
+  [0.25, 0.12, 0.12, 0.50],
+  [0.38, 0.06, 0.28, 0.62],
+  [0.50, 0.04, 0.45, 0.72],
+  [0.62, 0.02, 0.62, 0.68],
+  [0.74, 0.10, 0.78, 0.55],
+  [0.85, 0.45, 0.88, 0.30],
+  [0.93, 0.78, 0.94, 0.18],
+  [1.00, 0.96, 1.00, 0.12],
 ];
 
 function colorAt(t) {{
@@ -131,45 +135,49 @@ function colorAt(t) {{
 }}
 
 /* ── Renderer ── */
+const BG = 0x060a12;
 const renderer = new THREE.WebGLRenderer({{ antialias: true, alpha: false }});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 /* ── Scene ── */
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0f17);
-scene.fog = new THREE.FogExp2(0x0b0f17, 0.035);
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.FogExp2(BG, 0.06);
 
 /* ── Camera ── */
 const camera = new THREE.PerspectiveCamera(
-  45, window.innerWidth / window.innerHeight, 0.1, 200
+  42, window.innerWidth / window.innerHeight, 0.1, 200
 );
-camera.position.set(6, 4.5, 8);
+camera.position.set(7, 5, 9);
 
 /* ── Controls ── */
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.05;
+controls.dampingFactor = 0.04;
 controls.minDistance = 3;
-controls.maxDistance = 25;
-controls.maxPolarAngle = Math.PI * 0.48;
-controls.target.set(0, 0.6, 0);
+controls.maxDistance = 30;
+controls.maxPolarAngle = Math.PI * 0.47;
+controls.target.set(0, 0.8, 0);
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.4;
 
 /* ── Geometry: PlaneGeometry displaced by volume ── */
-const W = 10, D = 7, HSCALE = 3.0;
+const W = 10, D = 7, HSCALE = 3.2;
 const geo = new THREE.PlaneGeometry(W, D, COLS - 1, ROWS - 1);
 geo.rotateX(-Math.PI / 2);
 
 const pos = geo.attributes.position;
 const colors = new Float32Array(pos.count * 3);
+const emissiveMap = new Float32Array(pos.count);
 
 for (let i = 0; i < pos.count; i++) {{
-  /* PlaneGeometry lays out vertices row by row along width (x),
-     then advances along depth (z). Map to our grid. */
   const col = i % COLS;
   const row = Math.floor(i / COLS);
   const h = H[row * COLS + col];
@@ -180,58 +188,125 @@ for (let i = 0; i < pos.count; i++) {{
   colors[i * 3]     = c.r;
   colors[i * 3 + 1] = c.g;
   colors[i * 3 + 2] = c.b;
+
+  emissiveMap[i] = h;
 }}
 
 geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 geo.computeVertexNormals();
 
-/* ── Material ── */
+/* ── Custom shader material for per-vertex emissive glow ── */
 const mat = new THREE.MeshStandardMaterial({{
   vertexColors: true,
-  roughness: 0.32,
-  metalness: 0.12,
+  roughness: 0.35,
+  metalness: 0.18,
   flatShading: false,
   side: THREE.DoubleSide,
+  envMapIntensity: 0.4,
 }});
+
+/* Inject per-vertex emissive via onBeforeCompile */
+geo.setAttribute('aEmissive', new THREE.BufferAttribute(emissiveMap, 1));
+
+mat.onBeforeCompile = (shader) => {{
+  shader.vertexShader = shader.vertexShader.replace(
+    'void main() {{',
+    'attribute float aEmissive;\\nvarying float vEmissive;\\nvoid main() {{\\n  vEmissive = aEmissive;'
+  );
+  shader.fragmentShader = shader.fragmentShader.replace(
+    'void main() {{',
+    'varying float vEmissive;\\nvoid main() {{'
+  );
+  /* Boost emissive output for peaks */
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <emissivemap_fragment>',
+    `#include <emissivemap_fragment>
+     float ep = smoothstep(0.45, 1.0, vEmissive);
+     vec3 peakGlow = mix(vec3(0.0, 0.35, 0.6), vec3(0.7, 0.95, 0.2), smoothstep(0.7, 1.0, vEmissive));
+     totalEmissiveRadiance += peakGlow * ep * 1.8;`
+  );
+}};
 
 const mesh = new THREE.Mesh(geo, mat);
+mesh.castShadow = true;
+mesh.receiveShadow = true;
 scene.add(mesh);
 
+/* ── Grid floor ── */
+const gridSize = 16;
+const gridDiv = 40;
+const gridHelper = new THREE.GridHelper(gridSize, gridDiv, 0x1a2040, 0x0e1628);
+gridHelper.position.y = -0.08;
+gridHelper.material.transparent = true;
+gridHelper.material.opacity = 0.25;
+scene.add(gridHelper);
+
 /* ── Subtle reflection plane beneath the surface ── */
-const mirrorGeo = new THREE.PlaneGeometry(W * 1.4, D * 1.4);
+const mirrorGeo = new THREE.PlaneGeometry(W * 1.6, D * 1.6);
 mirrorGeo.rotateX(-Math.PI / 2);
 const mirrorMat = new THREE.MeshStandardMaterial({{
-  color: 0x0b0f17,
-  roughness: 0.6,
-  metalness: 0.3,
+  color: BG,
+  roughness: 0.5,
+  metalness: 0.4,
   transparent: true,
-  opacity: 0.35,
+  opacity: 0.3,
 }});
 const mirror = new THREE.Mesh(mirrorGeo, mirrorMat);
-mirror.position.y = -0.05;
+mirror.position.y = -0.1;
+mirror.receiveShadow = true;
 scene.add(mirror);
 
 /* ── Lighting ── */
-const amb = new THREE.AmbientLight(0x303050, 0.7);
+const amb = new THREE.AmbientLight(0x1a1a30, 0.5);
 scene.add(amb);
 
-const key = new THREE.DirectionalLight(0xffffff, 1.2);
-key.position.set(6, 10, 5);
+/* Key light with shadows */
+const key = new THREE.DirectionalLight(0xeeeeff, 1.4);
+key.position.set(6, 12, 5);
+key.castShadow = true;
+key.shadow.mapSize.width = 1024;
+key.shadow.mapSize.height = 1024;
+key.shadow.camera.near = 1;
+key.shadow.camera.far = 30;
+key.shadow.camera.left = -10;
+key.shadow.camera.right = 10;
+key.shadow.camera.top = 10;
+key.shadow.camera.bottom = -10;
+key.shadow.bias = -0.002;
 scene.add(key);
 
-const fill = new THREE.DirectionalLight(0x5577aa, 0.5);
-fill.position.set(-5, 4, -6);
+/* Cool fill from opposite side */
+const fill = new THREE.DirectionalLight(0x4466aa, 0.6);
+fill.position.set(-6, 5, -7);
 scene.add(fill);
 
-const rim = new THREE.DirectionalLight(0x8844cc, 0.3);
-rim.position.set(0, 2, -8);
+/* Rim light — purple accent from behind */
+const rim = new THREE.DirectionalLight(0x7733cc, 0.45);
+rim.position.set(0, 3, -10);
 scene.add(rim);
+
+/* Warm accent from below-front for depth */
+const accent = new THREE.PointLight(0x00ccaa, 0.3, 20);
+accent.position.set(2, -1, 4);
+scene.add(accent);
+
+/* ── Post-processing: Bloom (Unreal) ── */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.55,   /* strength */
+  0.6,    /* radius */
+  0.35    /* threshold */
+);
+composer.addPass(bloomPass);
 
 /* ── Render loop ── */
 function animate() {{
   requestAnimationFrame(animate);
   controls.update();
-  renderer.render(scene, camera);
+  composer.render();
 }}
 animate();
 
@@ -240,6 +315,7 @@ window.addEventListener('resize', () => {{
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 }});
 </script>
 </body>
